@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubeVideo, YoutubeVideoNote } from "@/lib/supabase/types";
 import { useRouter, useParams } from "next/navigation";
@@ -56,13 +56,17 @@ declare global {
     interface Window {
         YT: {
             Player: new (
-                elementId: string,
+                elementId: string | HTMLElement,
                 config: {
+                    width?: string | number;
+                    height?: string | number;
                     videoId: string;
+                    host?: string;
                     playerVars?: Record<string, unknown>;
                     events?: {
                         onReady?: (event: { target: YTPlayer }) => void;
                         onStateChange?: (event: { data: number }) => void;
+                        onError?: (event: { data: number }) => void;
                     };
                 }
             ) => YTPlayer;
@@ -83,6 +87,7 @@ interface YTPlayer {
     pauseVideo: () => void;
     getPlayerState: () => number;
     destroy: () => void;
+    getIframe: () => HTMLIFrameElement;
 }
 
 export default function VideoWatchPage() {
@@ -90,11 +95,13 @@ export default function VideoWatchPage() {
     const router = useRouter();
     const playlistId = params.id as string;
     const videoDbId = params.videoId as string;
-    const supabase = createClient();
+
+    // Memoize supabase client to prevent re-creation on every render
+    const supabase = useMemo(() => createClient(), []);
 
     const [video, setVideo] = useState<YoutubeVideo | null>(null);
     const [notes, setNotes] = useState<YoutubeVideoNote[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
     const [noteContent, setNoteContent] = useState("");
     const [noteTimestamp, setNoteTimestamp] = useState("");
     const [savingNote, setSavingNote] = useState(false);
@@ -107,24 +114,16 @@ export default function VideoWatchPage() {
     const playerRef = useRef<YTPlayer | null>(null);
     const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const playerContainerRef = useRef<HTMLDivElement>(null);
+    const userIdRef = useRef<string | null>(null);
+    const videoRef = useRef<YoutubeVideo | null>(null);
 
-    // Fetch video and notes data
-    const fetchData = useCallback(async () => {
-        setLoading(true);
+    // Keep videoRef in sync so event handlers can access latest video state
+    useEffect(() => {
+        videoRef.current = video;
+    }, [video]);
 
-        const { data: vidData, error: vidError } = await supabase
-            .from("youtube_videos")
-            .select("*")
-            .eq("id", videoDbId)
-            .single();
-
-        if (vidError || !vidData) {
-            router.push(`/youtube/${playlistId}`);
-            return;
-        }
-
-        setVideo(vidData as YoutubeVideo);
-
+    // Fetch only notes (lightweight, no loading spinner)
+    const refreshNotes = useCallback(async () => {
         const { data: notesData } = await supabase
             .from("youtube_video_notes")
             .select("*")
@@ -134,132 +133,304 @@ export default function VideoWatchPage() {
         if (notesData) {
             setNotes(notesData as YoutubeVideoNote[]);
         }
+    }, [videoDbId, supabase]);
 
-        setLoading(false);
-    }, [videoDbId, playlistId, router, supabase]);
+    // Mark video as watched (using ref to avoid stale closure)
+    const doMarkWatched = useCallback(async () => {
+        const v = videoRef.current;
+        if (!v) return;
+        const watchedAt = new Date().toISOString();
+        setVideo({ ...v, is_watched: true, watched_at: watchedAt });
+        await supabase
+            .from("youtube_videos")
+            .update({ is_watched: true, watched_at: watchedAt })
+            .eq("id", v.id);
+    }, [supabase]);
 
+    // Initial data fetch (only on mount)
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        let cancelled = false;
+
+        const fetchInitialData = async () => {
+            // Fetch video data
+            const { data: vidData, error: vidError } = await supabase
+                .from("youtube_videos")
+                .select("*")
+                .eq("id", videoDbId)
+                .single();
+
+            if (cancelled) return;
+
+            if (vidError || !vidData) {
+                router.push(`/youtube/${playlistId}`);
+                return;
+            }
+
+            setVideo(vidData as YoutubeVideo);
+
+            // Fetch notes
+            const { data: notesData } = await supabase
+                .from("youtube_video_notes")
+                .select("*")
+                .eq("video_ref_id", videoDbId)
+                .order("timestamp_seconds", { ascending: true });
+
+            if (cancelled) return;
+
+            if (notesData) {
+                setNotes(notesData as YoutubeVideoNote[]);
+            }
+
+            // Cache user ID for later use
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!cancelled && user) {
+                    userIdRef.current = user.id;
+                }
+            } catch {
+                // Ignore auth errors
+            }
+
+            setInitialLoading(false);
+        };
+
+        fetchInitialData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [videoDbId, playlistId, router, supabase]);
 
     // Initialize YouTube IFrame API
     useEffect(() => {
         if (!video) return;
 
-        const tag = document.createElement("script");
-        tag.src = "https://www.youtube.com/iframe_api";
-        const firstScriptTag = document.getElementsByTagName("script")[0];
-        firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+        const videoId = video.video_id;
+        let playerInterval: NodeJS.Timeout | null = null;
+        let initTimeout: NodeJS.Timeout | null = null;
+        let isUnmounted = false;
 
         const initPlayer = () => {
-            if (playerRef.current) {
-                playerRef.current.destroy();
+            if (isUnmounted) return;
+            const container = playerContainerRef.current;
+            if (!container) {
+                console.warn("Player container not found, retrying...");
+                // Retry after a short delay
+                initTimeout = setTimeout(initPlayer, 300);
+                return;
             }
-            playerRef.current = new window.YT.Player("yt-player", {
-                videoId: video.video_id,
-                playerVars: {
-                    autoplay: 0,
-                    modestbranding: 1,
-                    rel: 0,
-                },
-                events: {
-                    onReady: () => {
-                        // Start time tracking
-                        timeIntervalRef.current = setInterval(() => {
-                            if (playerRef.current) {
-                                try {
-                                    setCurrentTime(playerRef.current.getCurrentTime());
-                                    const state = playerRef.current.getPlayerState();
-                                    setIsPlaying(state === 1); // 1 = playing
-                                } catch {
-                                    // Player not ready
-                                }
-                            }
-                        }, 500);
-                    },
-                    onStateChange: (event: { data: number }) => {
-                        setIsPlaying(event.data === 1);
-                        // Auto mark as watched when video ends
-                        if (event.data === 0 && video && !video.is_watched) {
-                            markWatched();
-                        }
-                    },
-                },
-            });
-        };
 
-        if (window.YT && window.YT.Player) {
-            initPlayer();
-        } else {
-            window.onYouTubeIframeAPIReady = initPlayer;
-        }
-
-        return () => {
-            if (timeIntervalRef.current) {
-                clearInterval(timeIntervalRef.current);
-            }
+            // If we already have a player instance, destroy it
             if (playerRef.current) {
                 try {
                     playerRef.current.destroy();
                 } catch {
-                    // Already destroyed
+                    // Ignore
                 }
+                playerRef.current = null;
+            }
+
+            // Create a fresh element for the player
+            container.innerHTML = "";
+            const playerDiv = document.createElement("div");
+            playerDiv.id = `yt-player-${Date.now()}`;
+            playerDiv.style.width = "100%";
+            playerDiv.style.height = "100%";
+            container.appendChild(playerDiv);
+
+            try {
+                const player = new window.YT.Player(playerDiv.id, {
+                    width: "100%",
+                    height: "100%",
+                    videoId: videoId,
+                    playerVars: {
+                        autoplay: 1,
+                        modestbranding: 1,
+                        rel: 0,
+                        enablejsapi: 1,
+                        playsinline: 1,
+                    },
+                    events: {
+                        onReady: (event) => {
+                            if (isUnmounted) return;
+                            console.log("YouTube player ready");
+                            try {
+                                const iframe = event.target.getIframe();
+                                if (iframe) {
+                                    iframe.style.width = "100%";
+                                    iframe.style.height = "100%";
+                                    iframe.style.position = "absolute";
+                                    iframe.style.top = "0";
+                                    iframe.style.left = "0";
+                                    iframe.style.border = "none";
+                                }
+                            } catch {
+                                // Ignore iframe styling errors
+                            }
+
+                            // Start playback explicitly
+                            try {
+                                event.target.playVideo();
+                            } catch {
+                                // Autoplay might be blocked by browser
+                            }
+
+                            // Start time tracking
+                            if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+                            timeIntervalRef.current = setInterval(() => {
+                                if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+                                    try {
+                                        setCurrentTime(playerRef.current.getCurrentTime());
+                                        const state = playerRef.current.getPlayerState();
+                                        setIsPlaying(state === 1);
+                                    } catch {
+                                        // Ignore
+                                    }
+                                }
+                            }, 1000);
+                        },
+                        onStateChange: (event: { data: number }) => {
+                            if (isUnmounted) return;
+                            setIsPlaying(event.data === 1);
+                            // Mark as watched when video ends
+                            if (event.data === 0) {
+                                const v = videoRef.current;
+                                if (v && !v.is_watched) {
+                                    doMarkWatched();
+                                }
+                            }
+                        },
+                        onError: (event: { data: number }) => {
+                            console.error("YouTube Player Error:", event.data);
+                            // Error codes: 2=invalid param, 5=HTML5 error, 100=not found, 101/150=restricted
+                        },
+                    },
+                });
+                playerRef.current = player;
+            } catch (e) {
+                console.error("Error creating YouTube player:", e);
+            }
+        };
+
+        // Load YouTube IFrame API and initialize player
+        const startInit = () => {
+            initTimeout = setTimeout(() => {
+                if (isUnmounted) return;
+
+                if (window.YT && window.YT.Player) {
+                    initPlayer();
+                } else {
+                    // Load script if not already loaded
+                    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+                        const tag = document.createElement("script");
+                        tag.src = "https://www.youtube.com/iframe_api";
+                        tag.async = true;
+                        document.head.appendChild(tag);
+                    }
+
+                    // Also try onYouTubeIframeAPIReady callback
+                    const prevCallback = window.onYouTubeIframeAPIReady;
+                    window.onYouTubeIframeAPIReady = () => {
+                        if (prevCallback) prevCallback();
+                        if (!isUnmounted) {
+                            if (playerInterval) clearInterval(playerInterval);
+                            initPlayer();
+                        }
+                    };
+
+                    // Poll as fallback
+                    playerInterval = setInterval(() => {
+                        if (window.YT && window.YT.Player) {
+                            if (playerInterval) clearInterval(playerInterval);
+                            initPlayer();
+                        }
+                    }, 200);
+                }
+            }, 150);
+        };
+
+        startInit();
+
+        return () => {
+            isUnmounted = true;
+            if (initTimeout) clearTimeout(initTimeout);
+            if (playerInterval) clearInterval(playerInterval);
+            if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+            if (playerRef.current) {
+                try {
+                    playerRef.current.destroy();
+                } catch {
+                    // Ignore
+                }
+                playerRef.current = null;
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [video?.video_id]);
 
-    const markWatched = async () => {
-        if (!video) return;
-        await supabase
-            .from("youtube_videos")
-            .update({ is_watched: true, watched_at: new Date().toISOString() })
-            .eq("id", video.id);
-        setVideo({ ...video, is_watched: true, watched_at: new Date().toISOString() });
-    };
 
-    const toggleWatched = async () => {
+    const toggleWatched = useCallback(async () => {
         if (!video) return;
         const newWatched = !video.is_watched;
+        const watchedAt = newWatched ? new Date().toISOString() : null;
+
+        // Optimistic update
+        setVideo({
+            ...video,
+            is_watched: newWatched,
+            watched_at: watchedAt,
+        });
+
         await supabase
             .from("youtube_videos")
             .update({
                 is_watched: newWatched,
-                watched_at: newWatched ? new Date().toISOString() : null,
+                watched_at: watchedAt,
             })
             .eq("id", video.id);
-        setVideo({
-            ...video,
-            is_watched: newWatched,
-            watched_at: newWatched ? new Date().toISOString() : null,
-        });
-    };
+    }, [video, supabase]);
 
-    const seekTo = (seconds: number) => {
-        if (playerRef.current) {
-            playerRef.current.seekTo(seconds, true);
-            playerRef.current.playVideo();
+    const seekTo = useCallback((seconds: number) => {
+        if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
+            try {
+                playerRef.current.seekTo(seconds, true);
+                playerRef.current.playVideo();
+            } catch (e) {
+                console.error("Error seeking:", e);
+            }
         }
-    };
+    }, []);
 
-    const captureCurrentTime = () => {
-        if (playerRef.current) {
-            const time = Math.floor(playerRef.current.getCurrentTime());
-            setNoteTimestamp(formatTimestamp(time));
+    const captureCurrentTime = useCallback(() => {
+        if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+            try {
+                const time = Math.floor(playerRef.current.getCurrentTime());
+                setNoteTimestamp(formatTimestamp(time));
+            } catch (e) {
+                console.error("Error capturing time:", e);
+            }
         }
-    };
+    }, []);
 
-    const addNote = async () => {
+    const addNote = useCallback(async () => {
         if (!noteContent.trim()) return;
         setSavingNote(true);
 
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user) {
-            setSavingNote(false);
-            return;
+        const userId = userIdRef.current;
+        if (!userId) {
+            // Try to fetch user if not cached
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    userIdRef.current = user.id;
+                } else {
+                    setSavingNote(false);
+                    return;
+                }
+            } catch {
+                setSavingNote(false);
+                return;
+            }
         }
 
         let timestampSeconds = 0;
@@ -270,41 +441,82 @@ export default function VideoWatchPage() {
             }
         } else {
             // Use current player time
-            if (playerRef.current) {
-                timestampSeconds = Math.floor(playerRef.current.getCurrentTime());
+            if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+                try {
+                    timestampSeconds = Math.floor(playerRef.current.getCurrentTime());
+                } catch {
+                    // Ignore
+                }
             }
         }
 
-        await supabase.from("youtube_video_notes").insert({
-            user_id: user.id,
+        // Optimistic update: add note to UI immediately
+        const tempId = `temp-${Date.now()}`;
+        const now = new Date().toISOString();
+        const optimisticNote: YoutubeVideoNote = {
+            id: tempId,
+            user_id: userIdRef.current!,
             video_ref_id: videoDbId,
             timestamp_seconds: timestampSeconds,
             content: noteContent.trim(),
+            created_at: now,
+            updated_at: now,
+        };
+
+        setNotes(prev => {
+            const updated = [...prev, optimisticNote];
+            updated.sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
+            return updated;
         });
 
         setNoteContent("");
         setNoteTimestamp("");
         setSavingNote(false);
-        fetchData();
-    };
 
-    const updateNote = async (noteId: string) => {
+        // Actually save to DB in background
+        const { data: insertedNote } = await supabase.from("youtube_video_notes").insert({
+            user_id: userIdRef.current!,
+            video_ref_id: videoDbId,
+            timestamp_seconds: timestampSeconds,
+            content: optimisticNote.content,
+        }).select().single();
+
+        // Replace temp note with real one
+        if (insertedNote) {
+            setNotes(prev =>
+                prev.map(n => n.id === tempId ? (insertedNote as YoutubeVideoNote) : n)
+            );
+        } else {
+            // If insert failed, refresh from server
+            refreshNotes();
+        }
+    }, [noteContent, noteTimestamp, videoDbId, supabase, refreshNotes]);
+
+    const updateNote = useCallback(async (noteId: string) => {
         if (!editContent.trim()) return;
-        await supabase
-            .from("youtube_video_notes")
-            .update({ content: editContent.trim() })
-            .eq("id", noteId);
+        const trimmedContent = editContent.trim();
+
+        // Optimistic update
+        setNotes(prev =>
+            prev.map(n => n.id === noteId ? { ...n, content: trimmedContent } : n)
+        );
         setEditingNoteId(null);
         setEditContent("");
-        fetchData();
-    };
 
-    const deleteNote = async (noteId: string) => {
+        await supabase
+            .from("youtube_video_notes")
+            .update({ content: trimmedContent })
+            .eq("id", noteId);
+    }, [editContent, supabase]);
+
+    const deleteNote = useCallback(async (noteId: string) => {
+        // Optimistic update: remove from UI immediately
+        setNotes(prev => prev.filter(n => n.id !== noteId));
+
         await supabase.from("youtube_video_notes").delete().eq("id", noteId);
-        fetchData();
-    };
+    }, [supabase]);
 
-    if (loading) {
+    if (initialLoading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -378,10 +590,8 @@ export default function VideoWatchPage() {
             {/* Main Content */}
             <div className="flex-1 flex min-h-0">
                 {/* Video Player */}
-                <div className={`flex-1 flex flex-col min-w-0 ${sidebarOpen ? "" : ""}`}>
-                    <div className="flex-1 bg-black flex items-center justify-center" ref={playerContainerRef}>
-                        <div id="yt-player" className="w-full h-full" />
-                    </div>
+                <div className={`flex-1 flex flex-col min-w-0`}>
+                    <div className="flex-1 bg-black relative" style={{ minHeight: '360px' }} ref={playerContainerRef}></div>
 
                     {/* Video Info Bar */}
                     <div className="p-4 border-t border-border/30 bg-card/30 flex-shrink-0">

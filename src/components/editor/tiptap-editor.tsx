@@ -12,7 +12,7 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Link from "@tiptap/extension-link";
 import { common, createLowlight } from "lowlight";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SlashCommandMenu } from "./slash-command-menu";
+import { SlashCommandMenu, SlashCommandMenuHandle } from "./slash-command-menu";
 import { FloatingToolbar } from "./floating-toolbar";
 
 const lowlight = createLowlight(common);
@@ -34,6 +34,7 @@ export function TiptapEditor({
     const [toolbarPos, setToolbarPos] = useState({ top: 0, left: 0 });
     const slashQueryRef = useRef("");
     const editorContainerRef = useRef<HTMLDivElement>(null);
+    const slashMenuRef = useRef<SlashCommandMenuHandle>(null);
 
     const editor = useEditor({
         extensions: [
@@ -79,10 +80,8 @@ export function TiptapEditor({
                     "prose prose-invert max-w-none focus:outline-none min-h-[500px] px-1 py-2",
             },
             handleKeyDown: (_view, event) => {
-                if (slashMenuOpen) {
-                    if (["ArrowUp", "ArrowDown", "Enter"].includes(event.key)) {
-                        return true;
-                    }
+                if (slashMenuOpen && slashMenuRef.current) {
+                    return slashMenuRef.current.handleKeyDown(event as unknown as KeyboardEvent);
                 }
                 if (slashMenuOpen && event.key === "Escape") {
                     setSlashMenuOpen(false);
@@ -217,6 +216,7 @@ export function TiptapEditor({
             {/* Slash Command Menu */}
             {slashMenuOpen && (
                 <SlashCommandMenu
+                    ref={slashMenuRef}
                     query={slashQueryRef.current}
                     position={slashMenuPos}
                     onSelect={handleSlashCommand}

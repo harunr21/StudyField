@@ -163,29 +163,35 @@ export async function fetchPlaylistVideos(playlistId: string): Promise<YTVideoIt
 
 
     // Step 2: Fetch video durations in batches of 50
+    const durationPromises = [];
     for (let i = 0; i < allItems.length; i += 50) {
         const batch = allItems.slice(i, i + 50);
         const videoIds = batch.map((v) => v.videoId).join(",");
         const url = `${YOUTUBE_API_BASE}/videos?part=contentDetails&id=${videoIds}&key=${apiKey}`;
 
-        try {
-            const response = await fetch(url);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.items) {
-                    for (const videoDetail of data.items) {
-                        const item = allItems.find((v) => v.videoId === videoDetail.id);
-                        if (item && videoDetail.contentDetails?.duration) {
-                            item.duration = videoDetail.contentDetails.duration;
-                            item.durationFormatted = parseDuration(videoDetail.contentDetails.duration);
+        durationPromises.push(
+            fetch(url)
+                .then(async (response) => {
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.items) {
+                            for (const videoDetail of data.items) {
+                                const item = batch.find((v) => v.videoId === videoDetail.id);
+                                if (item && videoDetail.contentDetails?.duration) {
+                                    item.duration = videoDetail.contentDetails.duration;
+                                    item.durationFormatted = parseDuration(videoDetail.contentDetails.duration);
+                                }
+                            }
                         }
                     }
-                }
-            }
-        } catch {
-            // Duration fetch failed — non-critical, continue
-        }
+                })
+                .catch(() => {
+                    // Duration fetch failed — non-critical, continue
+                })
+        );
     }
+
+    await Promise.all(durationPromises);
 
     return allItems;
 }

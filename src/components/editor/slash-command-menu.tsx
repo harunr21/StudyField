@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
     Heading1,
     Heading2,
@@ -87,12 +87,16 @@ const commands = [
     },
 ];
 
-export function SlashCommandMenu({
+export interface SlashCommandMenuHandle {
+    handleKeyDown: (e: KeyboardEvent) => boolean;
+}
+
+export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandMenuProps>(({
     query,
     position,
     onSelect,
     onClose,
-}: SlashCommandMenuProps) {
+}, ref) => {
     const [selectedIndex, setSelectedIndex] = useState(0);
     const menuRef = useRef<HTMLDivElement>(null);
 
@@ -109,34 +113,32 @@ export function SlashCommandMenu({
         setSelectedIndex(0);
     }, [query]);
 
-    // Focus the menu when it appears
-    useEffect(() => {
-        if (menuRef.current) {
-            menuRef.current.focus();
-        }
-    }, []);
+    useImperativeHandle(ref, () => ({
+        handleKeyDown: (e: KeyboardEvent) => {
+            if (filteredCommands.length === 0) return false;
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setSelectedIndex((prev) =>
-                prev < filteredCommands.length - 1 ? prev + 1 : 0
-            );
-        } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setSelectedIndex((prev) =>
-                prev > 0 ? prev - 1 : filteredCommands.length - 1
-            );
-        } else if (e.key === "Enter") {
-            e.preventDefault();
-            if (filteredCommands[selectedIndex]) {
-                onSelect(filteredCommands[selectedIndex].id);
+            if (e.key === "ArrowDown") {
+                setSelectedIndex((prev) =>
+                    prev < filteredCommands.length - 1 ? prev + 1 : 0
+                );
+                return true;
+            } else if (e.key === "ArrowUp") {
+                setSelectedIndex((prev) =>
+                    prev > 0 ? prev - 1 : filteredCommands.length - 1
+                );
+                return true;
+            } else if (e.key === "Enter") {
+                if (filteredCommands[selectedIndex]) {
+                    onSelect(filteredCommands[selectedIndex].id);
+                    return true;
+                }
+            } else if (e.key === "Escape") {
+                onClose();
+                return true;
             }
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            onClose();
-        }
-    };
+            return false;
+        },
+    }));
 
     if (filteredCommands.length === 0) {
         return null;
@@ -145,8 +147,6 @@ export function SlashCommandMenu({
     return (
         <div
             ref={menuRef}
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
             className="absolute z-50 w-72 rounded-xl border border-border bg-popover p-1.5 shadow-2xl shadow-black/20 animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 outline-none"
             style={{ top: position.top, left: position.left }}
         >
@@ -181,4 +181,6 @@ export function SlashCommandMenu({
             ))}
         </div>
     );
-}
+});
+
+SlashCommandMenu.displayName = "SlashCommandMenu";

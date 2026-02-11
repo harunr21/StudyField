@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist, YoutubeVideo } from "@/lib/supabase/types";
 import { fetchPlaylistVideos, fetchPlaylistInfo } from "@/lib/youtube";
@@ -34,35 +34,91 @@ export default function PlaylistDetailPage() {
     const params = useParams();
     const router = useRouter();
     const playlistId = params.id as string;
-    const supabase = createClient();
+    const supabase = useMemo(() => createClient(), []);
 
     const [playlist, setPlaylist] = useState<YoutubePlaylist | null>(null);
     const [videos, setVideos] = useState<YoutubeVideo[]>([]);
     const [noteCounts, setNoteCounts] = useState<Record<string, number>>({});
-    const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [filter, setFilter] = useState<"all" | "watched" | "unwatched">("all");
     const [syncing, setSyncing] = useState(false);
     const [syncMessage, setSyncMessage] = useState("");
 
-    const fetchData = useCallback(async () => {
-        setLoading(true);
+    // Initial data fetch
+    useEffect(() => {
+        let cancelled = false;
 
-        // Fetch playlist info
-        const { data: plData, error: plError } = await supabase
+        const fetchData = async () => {
+            // Fetch playlist info
+            const { data: plData, error: plError } = await supabase
+                .from("youtube_playlists")
+                .select("*")
+                .eq("id", playlistId)
+                .single();
+
+            if (cancelled) return;
+
+            if (plError || !plData) {
+                router.push("/youtube");
+                return;
+            }
+
+            setPlaylist(plData as YoutubePlaylist);
+
+            // Fetch videos
+            const { data: vidData } = await supabase
+                .from("youtube_videos")
+                .select("*")
+                .eq("playlist_ref_id", playlistId)
+                .order("position", { ascending: true });
+
+            if (cancelled) return;
+
+            if (vidData) {
+                setVideos(vidData as YoutubeVideo[]);
+
+                // Fetch note counts for all videos efficiently
+                const videoIds = vidData.map((v) => v.id);
+                if (videoIds.length > 0) {
+                    const { data: allNotes } = await supabase
+                        .from("youtube_video_notes")
+                        .select("video_ref_id")
+                        .in("video_ref_id", videoIds);
+
+                    if (!cancelled && allNotes) {
+                        const counts: Record<string, number> = {};
+                        for (const note of allNotes) {
+                            const videoId = note.video_ref_id;
+                            counts[videoId] = (counts[videoId] || 0) + 1;
+                        }
+                        setNoteCounts(counts);
+                    }
+                }
+            }
+
+            setInitialLoading(false);
+        };
+
+        fetchData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [playlistId, router, supabase]);
+
+    // Refresh data (without loading spinner)
+    const refreshData = useCallback(async () => {
+        const { data: plData } = await supabase
             .from("youtube_playlists")
             .select("*")
             .eq("id", playlistId)
             .single();
 
-        if (plError || !plData) {
-            router.push("/youtube");
-            return;
+        if (plData) {
+            setPlaylist(plData as YoutubePlaylist);
         }
 
-        setPlaylist(plData as YoutubePlaylist);
-
-        // Fetch videos
         const { data: vidData } = await supabase
             .from("youtube_videos")
             .select("*")
@@ -72,24 +128,24 @@ export default function PlaylistDetailPage() {
         if (vidData) {
             setVideos(vidData as YoutubeVideo[]);
 
-            // Fetch note counts for each video
-            const counts: Record<string, number> = {};
-            for (const video of vidData as YoutubeVideo[]) {
-                const { count } = await supabase
+            const videoIds = vidData.map((v) => v.id);
+            if (videoIds.length > 0) {
+                const { data: allNotes } = await supabase
                     .from("youtube_video_notes")
-                    .select("*", { count: "exact", head: true })
-                    .eq("video_ref_id", video.id);
-                counts[video.id] = count || 0;
+                    .select("video_ref_id")
+                    .in("video_ref_id", videoIds);
+
+                if (allNotes) {
+                    const counts: Record<string, number> = {};
+                    for (const note of allNotes) {
+                        const videoId = note.video_ref_id;
+                        counts[videoId] = (counts[videoId] || 0) + 1;
+                    }
+                    setNoteCounts(counts);
+                }
             }
-            setNoteCounts(counts);
         }
-
-        setLoading(false);
-    }, [playlistId, router, supabase]);
-
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+    }, [playlistId, supabase]);
 
     // Sync videos from YouTube API (re-fetch and update)
     const syncVideos = async () => {
@@ -142,7 +198,6 @@ export default function PlaylistDetailPage() {
             }
 
             // Delete old videos and re-insert (preserving watch status)
-            // Using upsert-like approach: delete videos no longer in playlist, add new ones
             const ytVideoIds = new Set(ytVideos.map((v) => v.videoId));
             const existingVideoIds = new Set(existingMap.keys());
 
@@ -210,7 +265,7 @@ export default function PlaylistDetailPage() {
             );
             setTimeout(() => setSyncMessage(""), 3000);
 
-            fetchData();
+            refreshData();
         } catch (err) {
             setSyncMessage(err instanceof Error ? `Hata: ${err.message}` : "Senkronizasyon hatası.");
             setTimeout(() => setSyncMessage(""), 4000);
@@ -219,39 +274,57 @@ export default function PlaylistDetailPage() {
         setSyncing(false);
     };
 
-    const toggleWatched = async (video: YoutubeVideo) => {
+    const toggleWatched = useCallback(async (video: YoutubeVideo) => {
         const newWatched = !video.is_watched;
+        const watchedAt = newWatched ? new Date().toISOString() : null;
+
+        // Optimistic update
+        setVideos(prev =>
+            prev.map(v =>
+                v.id === video.id
+                    ? { ...v, is_watched: newWatched, watched_at: watchedAt }
+                    : v
+            )
+        );
+
         await supabase
             .from("youtube_videos")
             .update({
                 is_watched: newWatched,
-                watched_at: newWatched ? new Date().toISOString() : null,
+                watched_at: watchedAt,
             })
             .eq("id", video.id);
-        fetchData();
-    };
+    }, [supabase]);
 
-    const deleteVideo = async (id: string) => {
+    const deleteVideo = useCallback(async (id: string) => {
         if (!confirm("Bu videoyu silmek istediğine emin misin?")) return;
+
+        // Optimistic update
+        setVideos(prev => prev.filter(v => v.id !== id));
+
         await supabase.from("youtube_videos").delete().eq("id", id);
-        fetchData();
-    };
+    }, [supabase]);
 
-    // Filtered videos
-    const filteredVideos = videos
-        .filter((v) => {
-            if (filter === "watched") return v.is_watched;
-            if (filter === "unwatched") return !v.is_watched;
-            return true;
-        })
-        .filter((v) =>
-            v.title.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+    // Filtered videos (memoized)
+    const filteredVideos = useMemo(() => {
+        return videos
+            .filter((v) => {
+                if (filter === "watched") return v.is_watched;
+                if (filter === "unwatched") return !v.is_watched;
+                return true;
+            })
+            .filter((v) =>
+                v.title.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+    }, [videos, filter, searchQuery]);
 
-    const watchedCount = videos.filter((v) => v.is_watched).length;
-    const progress = videos.length > 0 ? Math.round((watchedCount / videos.length) * 100) : 0;
+    const watchedCount = useMemo(() => videos.filter((v) => v.is_watched).length, [videos]);
+    const progress = useMemo(
+        () => videos.length > 0 ? Math.round((watchedCount / videos.length) * 100) : 0,
+        [watchedCount, videos.length]
+    );
 
-    if (loading) {
+    if (initialLoading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -382,10 +455,10 @@ export default function PlaylistDetailPage() {
             {/* Sync message */}
             {syncMessage && (
                 <div className={`flex items-center gap-2 text-sm mb-4 px-3 py-2 rounded-lg ${syncMessage.startsWith("✓")
-                        ? "bg-emerald-500/10 text-emerald-400"
-                        : syncMessage.startsWith("Hata")
-                            ? "bg-destructive/10 text-destructive"
-                            : "bg-card text-muted-foreground"
+                    ? "bg-emerald-500/10 text-emerald-400"
+                    : syncMessage.startsWith("Hata")
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-card text-muted-foreground"
                     }`}>
                     {!syncMessage.startsWith("✓") && !syncMessage.startsWith("Hata") && (
                         <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
@@ -395,7 +468,7 @@ export default function PlaylistDetailPage() {
             )}
 
             {/* Video List */}
-            {filteredVideos.length === 0 && !loading && (
+            {filteredVideos.length === 0 && !initialLoading && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                     <div className="h-14 w-14 rounded-2xl bg-red-500/10 flex items-center justify-center mb-4">
                         <ListVideo className="h-7 w-7 text-red-500" />
@@ -447,6 +520,7 @@ export default function PlaylistDetailPage() {
                                 src={video.thumbnail_url || `https://img.youtube.com/vi/${video.video_id}/mqdefault.jpg`}
                                 alt={video.title}
                                 className="w-full h-full object-cover"
+                                loading="lazy"
                             />
                             <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/40 transition-colors flex items-center justify-center">
                                 <Play className="h-6 w-6 text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity" />

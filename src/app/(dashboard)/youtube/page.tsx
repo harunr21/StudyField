@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist } from "@/lib/supabase/types";
 import {
@@ -64,45 +64,67 @@ export default function YoutubePage() {
     const [addProgress, setAddProgress] = useState("");
     const [apiConfigured, setApiConfigured] = useState(true);
     const router = useRouter();
-    const supabase = createClient();
+    const supabase = useMemo(() => createClient(), []);
 
     useEffect(() => {
         setApiConfigured(isYoutubeApiConfigured());
     }, []);
 
-    const fetchPlaylists = useCallback(async () => {
-        setLoading(true);
-        const { data, error } = await supabase
-            .from("youtube_playlists")
-            .select("*")
-            .order("updated_at", { ascending: false });
+    // Initial data fetch
+    useEffect(() => {
+        let cancelled = false;
 
-        if (!error && data) {
-            setPlaylists(data as YoutubePlaylist[]);
+        const fetchPlaylists = async () => {
+            const { data, error } = await supabase
+                .from("youtube_playlists")
+                .select("*")
+                .order("updated_at", { ascending: false });
 
-            // Fetch video stats for each playlist
-            const stats: Record<string, { total: number; watched: number }> = {};
-            for (const pl of data as YoutubePlaylist[]) {
-                const { data: videos } = await supabase
-                    .from("youtube_videos")
-                    .select("is_watched")
-                    .eq("playlist_ref_id", pl.id);
+            if (cancelled) return;
 
-                if (videos) {
-                    stats[pl.id] = {
-                        total: videos.length,
-                        watched: videos.filter((v: { is_watched: boolean }) => v.is_watched).length,
-                    };
+            if (!error && data) {
+                setPlaylists(data as YoutubePlaylist[]);
+
+                // Fetch video stats for all playlists efficiently
+                const playlistIds = (data as YoutubePlaylist[]).map((pl) => pl.id);
+                if (playlistIds.length > 0) {
+                    const { data: allVideos } = await supabase
+                        .from("youtube_videos")
+                        .select("playlist_ref_id, is_watched")
+                        .in("playlist_ref_id", playlistIds);
+
+                    if (!cancelled) {
+                        const stats: Record<string, { total: number; watched: number }> = {};
+
+                        // Initialize stats for all playlists
+                        for (const id of playlistIds) {
+                            stats[id] = { total: 0, watched: 0 };
+                        }
+
+                        if (allVideos) {
+                            for (const video of allVideos) {
+                                const plId = video.playlist_ref_id;
+                                if (stats[plId]) {
+                                    stats[plId].total++;
+                                    if (video.is_watched) {
+                                        stats[plId].watched++;
+                                    }
+                                }
+                            }
+                        }
+                        setVideoStats(stats);
+                    }
                 }
             }
-            setVideoStats(stats);
-        }
-        setLoading(false);
-    }, [supabase]);
+            if (!cancelled) setLoading(false);
+        };
 
-    useEffect(() => {
         fetchPlaylists();
-    }, [fetchPlaylists]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [supabase]);
 
     const addPlaylist = async () => {
         setAddError("");
@@ -206,16 +228,22 @@ export default function YoutubePage() {
         }
     };
 
-    const deletePlaylist = async (id: string) => {
+    const deletePlaylist = useCallback(async (id: string) => {
         if (!confirm("Bu playlist'i ve tüm videolarını silmek istediğine emin misin?")) return;
+        // Optimistic update
+        setPlaylists(prev => prev.filter(pl => pl.id !== id));
+        setVideoStats(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+        });
         await supabase.from("youtube_playlists").delete().eq("id", id);
-        fetchPlaylists();
-    };
+    }, [supabase]);
 
-    const filteredPlaylists = playlists.filter((pl) =>
+    const filteredPlaylists = useMemo(() => playlists.filter((pl) =>
         pl.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         pl.channel_title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    ), [playlists, searchQuery]);
 
     // API Key not configured warning
     if (!apiConfigured) {
