@@ -241,7 +241,7 @@ export default function NoteEditorPage() {
                         value={title}
                         onChange={(e) => handleTitleChange(e.target.value)}
                         placeholder="Başlıksız"
-                        className="w-full text-4xl font-bold bg-transparent border-none outline-none placeholder:text-muted-foreground/30 tracking-tight"
+                        className="w-full text-4xl font-bold bg-transparent border-none outline-none placeholder:text-muted-foreground/30 tracking-tight py-2"
                     />
                 </div>
 
