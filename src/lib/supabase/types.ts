@@ -55,3 +55,31 @@ export interface YoutubeVideoNote {
     updated_at: string;
 }
 
+// PDF Types
+export interface PdfDocument {
+    id: string;
+    user_id: string;
+    title: string;
+    file_name: string;
+    file_url: string;
+    file_size: number;
+    page_count: number;
+    is_favorite: boolean;
+    is_archived: boolean;
+    last_page: number;
+    tags: string[];
+    created_at: string;
+    updated_at: string;
+}
+
+export interface PdfNote {
+    id: string;
+    user_id: string;
+    pdf_ref_id: string;
+    page_number: number;
+    content: string;
+    color: string;
+    created_at: string;
+    updated_at: string;
+}
+
