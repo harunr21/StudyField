@@ -13,6 +13,15 @@ export const metadata: Metadata = {
   description:
     "Notlar, YouTube playlists, PDF dökümanlar ve daha fazlası. Tüm çalışma araçların tek bir yerde.",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "StudyField",
+  },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export const viewport: Viewport = {
