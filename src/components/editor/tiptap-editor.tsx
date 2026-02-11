@@ -13,6 +13,8 @@ import Link from "@tiptap/extension-link";
 import { common, createLowlight } from "lowlight";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SlashCommandMenu, SlashCommandMenuHandle } from "./slash-command-menu";
+import Image from "@tiptap/extension-image";
+import { uploadImage } from "../../lib/upload-image";
 import { FloatingToolbar } from "./floating-toolbar";
 
 const lowlight = createLowlight(common);
@@ -43,6 +45,10 @@ export function TiptapEditor({
                 heading: {
                     levels: [1, 2, 3],
                 },
+            }),
+            Image.configure({
+                inline: true,
+                allowBase64: true,
             }),
             Placeholder.configure({
                 placeholder: ({ node }) => {
@@ -79,6 +85,7 @@ export function TiptapEditor({
                 class:
                     "prose prose-invert max-w-none focus:outline-none min-h-[500px] px-1 py-2",
             },
+
             handleKeyDown: (_view, event) => {
                 if (slashMenuOpen && slashMenuRef.current) {
                     return slashMenuRef.current.handleKeyDown(event as unknown as KeyboardEvent);
@@ -86,6 +93,27 @@ export function TiptapEditor({
                 if (slashMenuOpen && event.key === "Escape") {
                     setSlashMenuOpen(false);
                     return true;
+                }
+                return false;
+            },
+            handlePaste: (view, event) => {
+                if (event.clipboardData && event.clipboardData.files.length > 0) {
+                    event.preventDefault();
+                    const file = event.clipboardData.files[0];
+                    if (file.type.startsWith("image/")) {
+                        uploadImage(file).then((url) => {
+                            if (url) {
+                                view.dispatch(
+                                    view.state.tr.replaceSelectionWith(
+                                        view.state.schema.nodes.image.create({
+                                            src: url,
+                                        })
+                                    )
+                                );
+                            }
+                        });
+                        return true;
+                    }
                 }
                 return false;
             },
