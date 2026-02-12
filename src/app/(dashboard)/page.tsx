@@ -9,6 +9,9 @@ import {
     Sparkles,
 } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { formatHourValue, getWeekStart, parseDurationToSeconds } from "@/lib/dashboard-stats";
 
 const features = [
     {
@@ -28,7 +31,7 @@ const features = [
         shadowColor: "shadow-red-500/20",
     },
     {
-        title: "PDF Dökümanlar",
+        title: "PDF Dokümanlar",
         description: "PDF'lerini yükle, görüntüle ve organize et",
         icon: FileBox,
         href: "/pdf",
@@ -37,10 +40,96 @@ const features = [
     },
 ];
 
+interface QuickStats {
+    totalNotes: number;
+    totalPlaylists: number;
+    totalPdfDocuments: number;
+    weeklyStudySeconds: number;
+}
+
 export default function DashboardPage() {
+    const [quickStats, setQuickStats] = useState<QuickStats>({
+        totalNotes: 0,
+        totalPlaylists: 0,
+        totalPdfDocuments: 0,
+        weeklyStudySeconds: 0,
+    });
+    const [loadingStats, setLoadingStats] = useState(true);
+    const supabase = useMemo(() => createClient(), []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const fetchQuickStats = async () => {
+            setLoadingStats(true);
+            const weekStartIso = getWeekStart().toISOString();
+
+            const [notesResult, playlistsResult, pdfResult, weeklyVideosResult] = await Promise.all([
+                supabase
+                    .from("pages")
+                    .select("id", { count: "exact", head: true })
+                    .eq("is_archived", false),
+                supabase.from("youtube_playlists").select("id", { count: "exact", head: true }),
+                supabase
+                    .from("pdf_documents")
+                    .select("id", { count: "exact", head: true })
+                    .eq("is_archived", false),
+                supabase
+                    .from("youtube_videos")
+                    .select("duration, watched_at")
+                    .not("watched_at", "is", null)
+                    .gte("watched_at", weekStartIso),
+            ]);
+
+            if (cancelled) return;
+
+            const weeklyVideos =
+                (weeklyVideosResult.data as Array<{ duration: string; watched_at: string | null }>) ?? [];
+            const weeklyStudySeconds = weeklyVideos.reduce((total, video) => {
+                return total + parseDurationToSeconds(video.duration);
+            }, 0);
+
+            setQuickStats({
+                totalNotes: notesResult.count ?? 0,
+                totalPlaylists: playlistsResult.count ?? 0,
+                totalPdfDocuments: pdfResult.count ?? 0,
+                weeklyStudySeconds,
+            });
+            setLoadingStats(false);
+        };
+
+        fetchQuickStats();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [supabase]);
+
+    const stats = [
+        {
+            label: "Toplam Not",
+            value: loadingStats ? "..." : quickStats.totalNotes.toLocaleString("tr-TR"),
+            color: "text-violet-500",
+        },
+        {
+            label: "YouTube Playlist",
+            value: loadingStats ? "..." : quickStats.totalPlaylists.toLocaleString("tr-TR"),
+            color: "text-red-500",
+        },
+        {
+            label: "PDF Doküman",
+            value: loadingStats ? "..." : quickStats.totalPdfDocuments.toLocaleString("tr-TR"),
+            color: "text-blue-500",
+        },
+        {
+            label: "Bu Hafta",
+            value: loadingStats ? "... saat" : `${formatHourValue(quickStats.weeklyStudySeconds)} saat`,
+            color: "text-emerald-500",
+        },
+    ];
+
     return (
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
-            {/* Hero Section */}
             <div className="mb-12">
                 <div className="flex items-center gap-2 mb-3">
                     <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center">
@@ -57,12 +146,10 @@ export default function DashboardPage() {
                     </span>
                 </h1>
                 <p className="text-lg text-muted-foreground max-w-2xl">
-                    Tüm çalışma araçların tek bir yerde. Notlar al, videoları takip et,
-                    dökümanlarını organize et.
+                    Tüm çalışma araçların tek bir yerde. Notlar al, videoları takip et, dokümanlarını organize et.
                 </p>
             </div>
 
-            {/* Feature Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
                 {features.map((feature) => (
                     <Link
@@ -88,7 +175,6 @@ export default function DashboardPage() {
                                 Keşfet
                                 <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
                             </div>
-                            {/* Subtle gradient overlay on hover */}
                             <div
                                 className={`absolute inset-0 bg-gradient-to-br ${feature.gradient} opacity-0 group-hover:opacity-[0.03] transition-opacity duration-300 rounded-2xl`}
                             />
@@ -97,24 +183,18 @@ export default function DashboardPage() {
                 ))}
             </div>
 
-            {/* Quick Stats Section */}
             <div className="rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm p-6">
                 <div className="flex items-center gap-2 mb-4">
                     <BookOpen className="h-5 w-5 text-muted-foreground" />
                     <h2 className="text-lg font-semibold">Hızlı Bakış</h2>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[
-                        { label: "Toplam Not", value: "0", color: "text-violet-500" },
-                        { label: "YouTube Playlist", value: "0", color: "text-red-500" },
-                        { label: "PDF Döküman", value: "0", color: "text-blue-500" },
-                        { label: "Bu Hafta", value: "0 saat", color: "text-emerald-500" },
-                    ].map((stat) => (
+                    {stats.map((stat) => (
                         <div
                             key={stat.label}
                             className="text-center p-4 rounded-xl bg-background/50"
                         >
-                            <p className={`text-2xl font-bold ${stat.color}`}>
+                            <p className={`text-2xl font-bold ${stat.color} ${loadingStats ? "animate-pulse" : ""}`}>
                                 {stat.value}
                             </p>
                             <p className="text-xs text-muted-foreground mt-1">
