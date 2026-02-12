@@ -17,6 +17,12 @@ function itemIcon(kind: GlobalSearchItem["kind"]) {
     return <StickyNote className="h-4 w-4 text-blue-400" />;
 }
 
+function groupLabel(kind: GlobalSearchItem["kind"]) {
+    if (kind === "page") return "Not";
+    if (kind === "youtube_video" || kind === "youtube_note") return "YouTube";
+    return "PDF";
+}
+
 export function GlobalSearchDialog() {
     const router = useRouter();
     const supabase = useMemo(() => createClient(), []);
@@ -28,6 +34,21 @@ export function GlobalSearchDialog() {
     const [items, setItems] = useState<GlobalSearchItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const groupedItems = useMemo(() => {
+        const order = ["Not", "YouTube", "PDF"] as const;
+        const groups = new Map<(typeof order)[number], GlobalSearchItem[]>();
+
+        for (const key of order) groups.set(key, []);
+        for (const item of items) {
+            const key = groupLabel(item.kind) as (typeof order)[number];
+            groups.get(key)?.push(item);
+        }
+
+        return order
+            .map((key) => ({ label: key, items: groups.get(key) ?? [] }))
+            .filter((group) => group.items.length > 0);
+    }, [items]);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -145,18 +166,25 @@ export function GlobalSearchDialog() {
 
                         {!loading &&
                             !error &&
-                            items.map((item) => (
-                                <button
-                                    key={`${item.kind}:${item.id}`}
-                                    onClick={() => openItem(item.href)}
-                                    className="w-full text-left rounded-lg px-3 py-2.5 hover:bg-accent transition-colors flex items-start gap-3"
-                                >
-                                    <span className="mt-0.5">{itemIcon(item.kind)}</span>
-                                    <span className="min-w-0">
-                                        <span className="block text-sm font-medium truncate">{item.title}</span>
-                                        <span className="block text-xs text-muted-foreground truncate">{item.subtitle}</span>
-                                    </span>
-                                </button>
+                            groupedItems.map((group) => (
+                                <div key={group.label} className="mb-2 last:mb-0">
+                                    <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        {group.label}
+                                    </div>
+                                    {group.items.map((item) => (
+                                        <button
+                                            key={`${item.kind}:${item.id}`}
+                                            onClick={() => openItem(item.href)}
+                                            className="w-full text-left rounded-lg px-3 py-2.5 hover:bg-accent transition-colors flex items-start gap-3"
+                                        >
+                                            <span className="mt-0.5">{itemIcon(item.kind)}</span>
+                                            <span className="min-w-0">
+                                                <span className="block text-sm font-medium truncate">{item.title}</span>
+                                                <span className="block text-xs text-muted-foreground truncate">{item.subtitle}</span>
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
                             ))}
                     </div>
                 </DialogContent>

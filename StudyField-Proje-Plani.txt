@@ -1,0 +1,66 @@
+﻿StudyField Proje Yol Haritasi (Birlikte Olusturdugumuz Plan)
+Tarih: 2026-02-12
+
+1) Hedeflenen Ilk 3 Ozellik
+- Settings (kullanici ayarlari) (YAPILDI)
+- Global Search (Ctrl/Cmd+K komut paleti) (YAPILDI)
+- Calisma Seansi (Pomodoro + hedef takibi) (YAPILDI)
+
+2) Sprint Plani
+Sprint 1 (Temel Altyapi + MVP)
+- Settings sayfasini gercek hale getir: (YAPILDI)
+  theme, language, default_note_icon, week_starts_on, daily_goal_minutes
+- Global Search MVP: (YAPILDI)
+  pages.title, note icerigi, youtube_videos.title, youtube_video_notes.content,
+  pdf_documents.title, pdf_notes.content aramasi
+- Session Tracking MVP: (YAPILDI)
+  manuel Seans Baslat/Bitir, sure kaydi, stats ekranina gunluk toplam sure
+
+Sprint 2 (Derinlestirme + UX)
+- Global Search sonuclarini tur bazli iyilestirme (Not, YouTube, PDF) (YAPILDI)
+- Sonuctan baglama gitme: (YAPILDI)
+  /notes/[id], /youtube/[id]/watch/[videoId]?t=..., /pdf/[id]?page=...
+- Pomodoro modu: (YAPILDI)
+  25/5 preset + ozel sure + bildirim
+- Stats gelistirmesi: (YAPILDI)
+  gunluk hedef gerceklesme yuzdesi, haftalik seans sayisi
+
+3) Veritabani Plani
+- user_settings tablosu (YAPILDI)
+  user_id (pk), theme, language, default_note_icon,
+  week_starts_on, daily_goal_minutes, created_at, updated_at
+- study_sessions tablosu (YAPILDI)
+  id, user_id, source_type, source_ref_id,
+  started_at, ended_at, duration_seconds, planned_duration_seconds,
+  focus_score, notes, created_at, updated_at
+- (Opsiyonel) search_documents (YAPILDI)
+  performans icin tekil arama indeksi/tsvector yapisi
+
+4) Ekran ve Bilesen Isi
+- Settings sayfasi: kaydetme + optimistic UI (YAPILDI)
+- Header komut paleti: Global Search dialog (YAPILDI)
+- Session UI: header'da Seans Baslat/Pomodoro + mini timer (YAPILDI)
+- Stats: bugun, bu hafta, hedef yuzdesi kartlari (YAPILDI)
+- Sessions: seans gecmisi listesi + filtre + silme (YAPILDI)
+
+5) API/Servis Katmani
+- supabase/types guncellemeleri (YAPILDI)
+- dashboard-stats yardimci fonksiyonlari (YAPILDI)
+- Search: kisa vadede ilike, orta vadede full-text search (to_tsvector) (YAPILDI)
+
+6) Kabul Kriterleri
+- Ayarlar kalici ve tekrar giriste yukleniyor (YAPILDI)
+- Ctrl/Cmd+K ile arama aciliyor, sonuc listesi geliyor (YAPILDI)
+- Arama sonucu dogru baglama yonlendiriyor (timestamp/sayfa) (YAPILDI)
+- Seans baslat-bitir sure kaydediyor ve stats'ta gorunuyor (YAPILDI)
+- RLS: tum yeni tablolarda sadece sahibi erisebiliyor (YAPILDI)
+
+7) Riskler ve Onlemler
+- Arama performansi: ilike -> FTS gecisi
+- Buyuk client sayfalari: bilesenlere bolme
+- Yarım kalan seans: ileride heartbeat/auto-end stratejisi
+
+8) Durum Notu
+- Settings ve Global Search MVP tamamlandi (YAPILDI)
+- Study Session timer + focus stats eklendi (YAPILDI)
+- Son duzeltme: seans hatalari artik UI'da gorunur (YAPILDI)
