@@ -4,7 +4,7 @@ import { ReactNode, useMemo, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { StudySession } from "@/lib/supabase/types";
 import { formatClockValue } from "@/lib/dashboard-stats";
-import { Clock3, Loader2, Timer, PlayCircle, Search } from "lucide-react";
+import { Clock3, Loader2, Timer, PlayCircle, Search, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 type SessionFilter = "all" | "manual" | "pomodoro" | "active" | "completed";
@@ -38,6 +38,7 @@ export default function SessionsPage() {
     const [filter, setFilter] = useState<SessionFilter>("all");
     const [query, setQuery] = useState("");
     const [error, setError] = useState<string | null>(null);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -87,6 +88,29 @@ export default function SessionsPage() {
     });
 
     const totalSeconds = filtered.reduce((sum, item) => sum + resolveDuration(item), 0);
+
+    const deleteSession = async (session: StudySession) => {
+        const approved = confirm("Bu seansi silmek istediginize emin misiniz?");
+        if (!approved) return;
+
+        setError(null);
+        setDeletingId(session.id);
+
+        const previous = sessions;
+        setSessions((prev) => prev.filter((item) => item.id !== session.id));
+
+        const { error: deleteError } = await supabase
+            .from("study_sessions")
+            .delete()
+            .eq("id", session.id);
+
+        if (deleteError) {
+            setSessions(previous);
+            setError(deleteError.message || "Seans silinemedi.");
+        }
+
+        setDeletingId(null);
+    };
 
     return (
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
@@ -166,7 +190,8 @@ export default function SessionsPage() {
                         <div className="col-span-2">Durum</div>
                         <div className="col-span-2">Tip</div>
                         <div className="col-span-2 text-right">Sure</div>
-                        <div className="col-span-3">Not</div>
+                        <div className="col-span-2">Not</div>
+                        <div className="col-span-1 text-right">Islem</div>
                     </div>
                     {filtered.map((session) => (
                         <div
@@ -187,7 +212,21 @@ export default function SessionsPage() {
                             </div>
                             <div className="col-span-2 capitalize">{session.source_type}</div>
                             <div className="col-span-2 text-right font-medium">{formatClockValue(resolveDuration(session))}</div>
-                            <div className="col-span-3 text-muted-foreground truncate">{session.notes || "-"}</div>
+                            <div className="col-span-2 text-muted-foreground truncate">{session.notes || "-"}</div>
+                            <div className="col-span-1 flex justify-end">
+                                <button
+                                    onClick={() => deleteSession(session)}
+                                    disabled={deletingId === session.id}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/5 transition-colors disabled:opacity-50"
+                                    title="Seansi sil"
+                                >
+                                    {deletingId === session.id ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
