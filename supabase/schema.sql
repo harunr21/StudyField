@@ -307,3 +307,48 @@ CREATE TRIGGER update_pdf_notes_updated_at
 ALTER PUBLICATION supabase_realtime ADD TABLE pdf_documents;
 ALTER PUBLICATION supabase_realtime ADD TABLE pdf_notes;
 
+-- =============================================
+-- USER SETTINGS TABLE
+-- Stores per-user preferences
+-- =============================================
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  theme TEXT NOT NULL DEFAULT 'system',
+  language TEXT NOT NULL DEFAULT 'tr',
+  default_note_icon TEXT NOT NULL DEFAULT '📝',
+  week_starts_on SMALLINT NOT NULL DEFAULT 1,
+  daily_goal_minutes INTEGER NOT NULL DEFAULT 120,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CHECK (theme IN ('light', 'dark', 'system')),
+  CHECK (language IN ('tr', 'en')),
+  CHECK (week_starts_on IN (0, 1)),
+  CHECK (daily_goal_minutes BETWEEN 15 AND 1440)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_settings_updated_at ON user_settings(updated_at DESC);
+
+-- RLS for user_settings
+ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own settings"
+  ON user_settings FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create own settings"
+  ON user_settings FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own settings"
+  ON user_settings FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own settings"
+  ON user_settings FOR DELETE
+  USING (auth.uid() = user_id);
+
+CREATE TRIGGER update_user_settings_updated_at
+  BEFORE UPDATE ON user_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+

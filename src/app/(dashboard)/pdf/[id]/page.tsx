@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PdfDocument, PdfNote } from "@/lib/supabase/types";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -74,9 +74,11 @@ function formatDate(dateString: string) {
 
 export default function PdfViewerPage() {
     const params = useParams();
+    const searchParams = useSearchParams();
     const router = useRouter();
     const supabase = useMemo(() => createClient(), []);
     const pdfId = params.id as string;
+    const requestedPage = Number.parseInt(searchParams.get("page") ?? "0", 10) || 0;
 
     // Document state
     const [document, setDocument] = useState<PdfDocument | null>(null);
@@ -203,7 +205,7 @@ export default function PdfViewerPage() {
             }
 
             setDocument(data as PdfDocument);
-            setCurrentPage(data.last_page || 1);
+            setCurrentPage(requestedPage > 0 ? requestedPage : data.last_page || 1);
             setNumPages(data.page_count || 0);
             setTitleValue(data.title);
             setLoading(false);
@@ -211,7 +213,7 @@ export default function PdfViewerPage() {
 
         fetchDocument();
         return () => { cancelled = true; };
-    }, [pdfId, supabase]);
+    }, [pdfId, requestedPage, supabase]);
 
     // Fetch notes
     const fetchNotes = useCallback(async () => {

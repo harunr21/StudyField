@@ -83,3 +83,15 @@ export interface PdfNote {
     updated_at: string;
 }
 
+// User Settings Types
+export interface UserSettings {
+    user_id: string;
+    theme: "light" | "dark" | "system";
+    language: "tr" | "en";
+    default_note_icon: string;
+    week_starts_on: 0 | 1;
+    daily_goal_minutes: number;
+    created_at: string;
+    updated_at: string;
+}
+

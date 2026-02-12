@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubeVideo, YoutubeVideoNote } from "@/lib/supabase/types";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
     ArrowLeft,
@@ -92,9 +92,11 @@ interface YTPlayer {
 
 export default function VideoWatchPage() {
     const params = useParams();
+    const searchParams = useSearchParams();
     const router = useRouter();
     const playlistId = params.id as string;
     const videoDbId = params.videoId as string;
+    const requestedStartAt = Number.parseInt(searchParams.get("t") ?? "0", 10) || 0;
 
     // Memoize supabase client to prevent re-creation on every render
     const supabase = useMemo(() => createClient(), []);
@@ -271,6 +273,9 @@ export default function VideoWatchPage() {
                             // Start playback explicitly
                             try {
                                 event.target.playVideo();
+                                if (requestedStartAt > 0) {
+                                    event.target.seekTo(requestedStartAt, true);
+                                }
                             } catch {
                                 // Autoplay might be blocked by browser
                             }
@@ -366,7 +371,7 @@ export default function VideoWatchPage() {
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [video?.video_id]);
+    }, [video?.video_id, requestedStartAt]);
 
 
     const toggleWatched = useCallback(async () => {
