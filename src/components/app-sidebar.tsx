@@ -1,9 +1,8 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import {
     Sidebar,
     SidebarContent,
@@ -36,6 +35,7 @@ import {
     Home,
     PlusCircle,
     BarChart3,
+    History,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -45,7 +45,7 @@ const mainNavItems = [
         icon: Home,
     },
     {
-        title: "Notlarım",
+        title: "Notlarim",
         url: "/notes",
         icon: FileText,
     },
@@ -55,14 +55,19 @@ const mainNavItems = [
         icon: Youtube,
     },
     {
-        title: "PDF Dökümanlar",
+        title: "PDF Dokumanlar",
         url: "/pdf",
         icon: FileBox,
     },
     {
-        title: "İstatistikler",
+        title: "Istatistikler",
         url: "/stats",
         icon: BarChart3,
+    },
+    {
+        title: "Seans Gecmisi",
+        url: "/sessions",
+        icon: History,
     },
 ];
 
@@ -106,7 +111,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
 
             <SidebarContent>
                 <SidebarGroup>
-                    <SidebarGroupLabel>Menü</SidebarGroupLabel>
+                    <SidebarGroupLabel>Menu</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
                             {mainNavItems.map((item) => (
@@ -128,7 +133,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                 </SidebarGroup>
 
                 <SidebarGroup>
-                    <SidebarGroupLabel>Hızlı Eylemler</SidebarGroupLabel>
+                    <SidebarGroupLabel>Hizli Eylemler</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
                             <SidebarMenuItem>
@@ -159,7 +164,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                         </AvatarFallback>
                                     </Avatar>
                                     <div className="grid flex-1 text-left text-sm leading-tight">
-                                        <span className="truncate font-semibold">Hesabım</span>
+                                        <span className="truncate font-semibold">Hesabim</span>
                                         <span className="truncate text-xs text-muted-foreground">
                                             {userEmail || "user@email.com"}
                                         </span>
@@ -185,7 +190,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                     className="cursor-pointer text-destructive focus:text-destructive"
                                 >
                                     <LogOut className="mr-2 h-4 w-4" />
-                                    Çıkış Yap
+                                    Cikis Yap
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
