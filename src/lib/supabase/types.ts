@@ -95,3 +95,19 @@ export interface UserSettings {
     updated_at: string;
 }
 
+// Study Sessions Types
+export interface StudySession {
+    id: string;
+    user_id: string;
+    source_type: "manual" | "pomodoro" | "youtube" | "pdf" | "notes";
+    source_ref_id: string | null;
+    started_at: string;
+    ended_at: string | null;
+    duration_seconds: number;
+    planned_duration_seconds: number | null;
+    focus_score: number | null;
+    notes: string;
+    created_at: string;
+    updated_at: string;
+}
+

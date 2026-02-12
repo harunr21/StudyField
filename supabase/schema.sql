@@ -352,3 +352,53 @@ CREATE TRIGGER update_user_settings_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+-- =============================================
+-- STUDY SESSIONS TABLE
+-- Stores focus sessions (manual + pomodoro)
+-- =============================================
+CREATE TABLE IF NOT EXISTS study_sessions (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL DEFAULT 'manual',
+  source_ref_id UUID,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at TIMESTAMPTZ,
+  duration_seconds INTEGER NOT NULL DEFAULT 0,
+  planned_duration_seconds INTEGER,
+  focus_score SMALLINT,
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CHECK (source_type IN ('manual', 'pomodoro', 'youtube', 'pdf', 'notes')),
+  CHECK (duration_seconds >= 0),
+  CHECK (planned_duration_seconds IS NULL OR planned_duration_seconds > 0),
+  CHECK (focus_score IS NULL OR (focus_score >= 1 AND focus_score <= 5))
+);
+
+CREATE INDEX IF NOT EXISTS idx_study_sessions_user_started ON study_sessions(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_study_sessions_active ON study_sessions(user_id, ended_at);
+
+-- RLS for study_sessions
+ALTER TABLE study_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own study sessions"
+  ON study_sessions FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create own study sessions"
+  ON study_sessions FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own study sessions"
+  ON study_sessions FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own study sessions"
+  ON study_sessions FOR DELETE
+  USING (auth.uid() = user_id);
+
+CREATE TRIGGER update_study_sessions_updated_at
+  BEFORE UPDATE ON study_sessions
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+

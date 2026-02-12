@@ -31,6 +31,10 @@ interface StatsSnapshot {
     archivedPdfDocuments: number;
     totalPdfNotes: number;
     weeklyStudySeconds: number;
+    weeklySessionSeconds: number;
+    weeklySessionCount: number;
+    todaySessionSeconds: number;
+    dailyGoalMinutes: number;
     weeklyWatchedVideos: number;
     weeklyUpdatedNotes: number;
     weeklyPdfNotes: number;
@@ -47,6 +51,10 @@ const initialStats: StatsSnapshot = {
     archivedPdfDocuments: 0,
     totalPdfNotes: 0,
     weeklyStudySeconds: 0,
+    weeklySessionSeconds: 0,
+    weeklySessionCount: 0,
+    todaySessionSeconds: 0,
+    dailyGoalMinutes: 120,
     weeklyWatchedVideos: 0,
     weeklyUpdatedNotes: 0,
     weeklyPdfNotes: 0,
@@ -61,6 +69,16 @@ interface DateOnlyRow {
 interface RecentVideoRow {
     duration: string;
     watched_at: string | null;
+}
+
+interface StudySessionRow {
+    started_at: string;
+    ended_at: string | null;
+    duration_seconds: number;
+}
+
+interface UserSettingsRow {
+    daily_goal_minutes: number;
 }
 
 export default function StatsPage() {
@@ -82,6 +100,10 @@ export default function StatsPage() {
             sevenDaysStart.setDate(sevenDaysStart.getDate() - 6);
             const sevenDaysStartIso = sevenDaysStart.toISOString();
 
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const todayStartTime = todayStart.getTime();
+
             const [
                 notesActiveResult,
                 notesArchivedResult,
@@ -94,6 +116,8 @@ export default function StatsPage() {
                 pdfArchivedResult,
                 pdfNotesTotalResult,
                 pdfNotesRecentResult,
+                studySessionsRecentResult,
+                userSettingsResult,
             ] = await Promise.all([
                 supabase
                     .from("pages")
@@ -131,6 +155,14 @@ export default function StatsPage() {
                     .from("pdf_notes")
                     .select("created_at")
                     .gte("created_at", sevenDaysStartIso),
+                supabase
+                    .from("study_sessions")
+                    .select("started_at,ended_at,duration_seconds")
+                    .gte("started_at", sevenDaysStartIso),
+                supabase
+                    .from("user_settings")
+                    .select("daily_goal_minutes")
+                    .maybeSingle(),
             ]);
 
             if (cancelled) return;
@@ -200,6 +232,33 @@ export default function StatsPage() {
                 point.total += 1;
             }
 
+            let weeklySessionSeconds = 0;
+            let weeklySessionCount = 0;
+            let todaySessionSeconds = 0;
+            const nowMs = Date.now();
+            const studySessions = (studySessionsRecentResult.data as StudySessionRow[]) ?? [];
+
+            for (const session of studySessions) {
+                const startedAtMs = new Date(session.started_at).getTime();
+                if (Number.isNaN(startedAtMs)) continue;
+
+                const endedAtMs = session.ended_at ? new Date(session.ended_at).getTime() : nowMs;
+                const fallbackDuration = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+                const durationSeconds = session.duration_seconds > 0 ? session.duration_seconds : fallbackDuration;
+
+                if (startedAtMs >= weekStartTime) {
+                    weeklySessionSeconds += durationSeconds;
+                    weeklySessionCount++;
+                }
+
+                if (startedAtMs >= todayStartTime) {
+                    todaySessionSeconds += durationSeconds;
+                }
+            }
+
+            const userSettings = userSettingsResult.data as UserSettingsRow | null;
+            const dailyGoalMinutes = userSettings?.daily_goal_minutes ?? 120;
+
             setStats({
                 totalNotes: notesActiveResult.count ?? 0,
                 archivedNotes: notesArchivedResult.count ?? 0,
@@ -210,6 +269,10 @@ export default function StatsPage() {
                 archivedPdfDocuments: pdfArchivedResult.count ?? 0,
                 totalPdfNotes: pdfNotesTotalResult.count ?? 0,
                 weeklyStudySeconds,
+                weeklySessionSeconds,
+                weeklySessionCount,
+                todaySessionSeconds,
+                dailyGoalMinutes,
                 weeklyWatchedVideos,
                 weeklyUpdatedNotes,
                 weeklyPdfNotes,
@@ -229,13 +292,16 @@ export default function StatsPage() {
     const videoCompletionRate = stats.totalVideos > 0
         ? Math.round((stats.watchedVideos / stats.totalVideos) * 100)
         : 0;
+
     const maxDailyTotal = Math.max(...stats.activity.map((day) => day.total), 1);
+    const dailyGoalSeconds = Math.max(1, stats.dailyGoalMinutes * 60);
+    const dailyGoalRate = Math.min(100, Math.round((stats.todaySessionSeconds / dailyGoalSeconds) * 100));
 
     return (
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
-            <h1 className="text-3xl font-bold tracking-tight mb-2">İstatistikler</h1>
+            <h1 className="text-3xl font-bold tracking-tight mb-2">Istatistikler</h1>
             <p className="text-muted-foreground mb-8">
-                Çalışma alışkanlıklarını ve ilerleme durumunu izle.
+                Calisma aliskanliklarini ve ilerleme durumunu izle.
             </p>
 
             {loading ? (
@@ -253,7 +319,7 @@ export default function StatsPage() {
                         icon={<FileText className="h-4 w-4 text-violet-400" />}
                         label="Toplam Not"
                         value={stats.totalNotes.toLocaleString("tr-TR")}
-                        subValue={`${stats.archivedNotes.toLocaleString("tr-TR")} arşiv`}
+                        subValue={`${stats.archivedNotes.toLocaleString("tr-TR")} arsiv`}
                     />
                     <StatCard
                         icon={<Youtube className="h-4 w-4 text-red-400" />}
@@ -263,15 +329,15 @@ export default function StatsPage() {
                     />
                     <StatCard
                         icon={<FileBox className="h-4 w-4 text-blue-400" />}
-                        label="PDF Doküman"
+                        label="PDF Dokuman"
                         value={stats.totalPdfDocuments.toLocaleString("tr-TR")}
-                        subValue={`${stats.archivedPdfDocuments.toLocaleString("tr-TR")} arşiv`}
+                        subValue={`${stats.archivedPdfDocuments.toLocaleString("tr-TR")} arsiv`}
                     />
                     <StatCard
                         icon={<Clock3 className="h-4 w-4 text-emerald-400" />}
-                        label="Bu Hafta"
-                        value={`${formatHourValue(stats.weeklyStudySeconds)} saat`}
-                        subValue={`${stats.weeklyWatchedVideos.toLocaleString("tr-TR")} video tamamlandı`}
+                        label="Odak (Haftalik)"
+                        value={`${formatHourValue(stats.weeklySessionSeconds)} saat`}
+                        subValue={`${stats.weeklySessionCount.toLocaleString("tr-TR")} seans`}
                     />
                 </div>
             )}
@@ -280,7 +346,7 @@ export default function StatsPage() {
                 <div className="xl:col-span-2 rounded-2xl border border-border/50 bg-card/50 p-6">
                     <div className="flex items-center gap-2 mb-6">
                         <Activity className="h-5 w-5 text-muted-foreground" />
-                        <h2 className="text-lg font-semibold">Son 7 Gün Aktivite</h2>
+                        <h2 className="text-lg font-semibold">Son 7 Gun Aktivite</h2>
                     </div>
 
                     <div className="grid grid-cols-7 gap-3">
@@ -315,15 +381,15 @@ export default function StatsPage() {
                     <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1.5">
                             <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
-                            Not güncellemeleri
+                            Not guncellemeleri
                         </span>
                         <span className="inline-flex items-center gap-1.5">
                             <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-                            İzlenen videolar
+                            Izlenen videolar
                         </span>
                         <span className="inline-flex items-center gap-1.5">
                             <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                            PDF notları
+                            PDF notlari
                         </span>
                     </div>
                 </div>
@@ -332,7 +398,7 @@ export default function StatsPage() {
                     <div>
                         <div className="flex items-center gap-2 mb-4">
                             <CheckCircle2 className="h-5 w-5 text-muted-foreground" />
-                            <h2 className="text-lg font-semibold">İlerleme</h2>
+                            <h2 className="text-lg font-semibold">Ilerleme</h2>
                         </div>
 
                         <div className="space-y-4">
@@ -348,15 +414,44 @@ export default function StatsPage() {
                                     />
                                 </div>
                             </div>
+                            <div>
+                                <div className="flex items-center justify-between text-sm mb-1">
+                                    <span>Gunluk odak hedefi</span>
+                                    <span className="font-semibold">
+                                        %{dailyGoalRate} ({Math.round(stats.todaySessionSeconds / 60)} / {stats.dailyGoalMinutes} dk)
+                                    </span>
+                                </div>
+                                <div className="h-2 rounded-full bg-background/70 overflow-hidden">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500"
+                                        style={{ width: `${dailyGoalRate}%` }}
+                                    />
+                                </div>
+                            </div>
                             <ProgressLine
-                                label="Bu hafta not güncellemesi"
+                                label="Bu hafta not guncellemesi"
                                 value={stats.weeklyUpdatedNotes}
                                 accent="text-violet-400"
+                            />
+                            <ProgressLine
+                                label="Bu hafta odak seansi"
+                                value={stats.weeklySessionCount}
+                                accent="text-emerald-400"
                             />
                             <ProgressLine
                                 label="Bu hafta PDF notu"
                                 value={stats.weeklyPdfNotes}
                                 accent="text-blue-400"
+                            />
+                            <ProgressLine
+                                label="Bu hafta izlenen video"
+                                value={stats.weeklyWatchedVideos}
+                                accent="text-red-400"
+                            />
+                            <ProgressLine
+                                label="Video izleme suresi (saat)"
+                                value={Math.round(stats.weeklyStudySeconds / 3600)}
+                                accent="text-red-300"
                             />
                         </div>
                     </div>
@@ -364,12 +459,12 @@ export default function StatsPage() {
                     <div className="pt-2 border-t border-border/50">
                         <div className="flex items-center gap-2 mb-3">
                             <BookOpenText className="h-5 w-5 text-muted-foreground" />
-                            <h3 className="font-semibold">Hızlı Erişim</h3>
+                            <h3 className="font-semibold">Hizli Erisim</h3>
                         </div>
                         <div className="space-y-2">
-                            <QuickLink href="/notes" label="Notları aç" />
+                            <QuickLink href="/notes" label="Notlari ac" />
                             <QuickLink href="/youtube" label="YouTube playlistleri" />
-                            <QuickLink href="/pdf" label="PDF kütüphanesi" />
+                            <QuickLink href="/pdf" label="PDF kutuphanesi" />
                         </div>
                     </div>
                 </div>

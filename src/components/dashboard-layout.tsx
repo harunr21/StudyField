@@ -2,6 +2,7 @@
 
 import { ModeToggle } from "@/components/mode-toggle";
 import { GlobalSearchDialog } from "@/components/search/global-search-dialog";
+import { StudySessionTimer } from "@/components/study-session-timer";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -52,6 +53,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                         <SidebarTrigger className="-ml-1" />
                         <Separator orientation="vertical" className="mr-2 !h-4" />
                         <div className="flex-1" />
+                        <StudySessionTimer />
                         <GlobalSearchDialog />
                         <ModeToggle />
                     </header>
