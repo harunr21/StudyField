@@ -23,6 +23,7 @@ export function StudySessionTimer() {
     const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [presetMinutes, setPresetMinutes] = useState(25);
+    const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
     const syncElapsed = useCallback((startedAt: string) => {
         const started = new Date(startedAt).getTime();
@@ -33,6 +34,7 @@ export function StudySessionTimer() {
 
     const loadActiveSession = useCallback(async () => {
         setLoading(true);
+        setStatusMessage(null);
         const {
             data: { user },
         } = await supabase.auth.getUser();
@@ -44,7 +46,7 @@ export function StudySessionTimer() {
             return;
         }
 
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from("study_sessions")
             .select("id,started_at,source_type,planned_duration_seconds")
             .eq("user_id", user.id)
@@ -52,6 +54,14 @@ export function StudySessionTimer() {
             .order("started_at", { ascending: false })
             .limit(1)
             .maybeSingle();
+
+        if (error) {
+            setStatusMessage("Seans verisi okunamadi. `migrate_study_sessions.sql` dosyasini kontrol edin.");
+            setActiveSession(null);
+            setElapsedSeconds(0);
+            setLoading(false);
+            return;
+        }
 
         if (!data) {
             setActiveSession(null);
@@ -84,12 +94,14 @@ export function StudySessionTimer() {
     const startSession = async (sourceType: "manual" | "pomodoro", plannedSeconds: number | null) => {
         if (saving || activeSession) return;
         setSaving(true);
+        setStatusMessage(null);
 
         const {
             data: { user },
         } = await supabase.auth.getUser();
 
         if (!user) {
+            setStatusMessage("Oturum bilgisi alinamadi. Lutfen tekrar giris yapin.");
             setSaving(false);
             return;
         }
@@ -110,6 +122,9 @@ export function StudySessionTimer() {
             const session = data as ActiveSession;
             setActiveSession(session);
             syncElapsed(session.started_at);
+            setStatusMessage(null);
+        } else {
+            setStatusMessage(error?.message ?? "Seans baslatilamadi.");
         }
 
         setSaving(false);
@@ -118,9 +133,10 @@ export function StudySessionTimer() {
     const stopSession = async () => {
         if (!activeSession || saving) return;
         setSaving(true);
+        setStatusMessage(null);
         const durationSeconds = Math.max(0, elapsedSeconds);
 
-        await supabase
+        const { error } = await supabase
             .from("study_sessions")
             .update({
                 ended_at: new Date().toISOString(),
@@ -128,6 +144,13 @@ export function StudySessionTimer() {
             })
             .eq("id", activeSession.id);
 
+        if (error) {
+            setStatusMessage(error.message ?? "Seans bitirilemedi.");
+            setSaving(false);
+            return;
+        }
+
+        setStatusMessage(null);
         setActiveSession(null);
         setElapsedSeconds(0);
         setSaving(false);
@@ -144,41 +167,44 @@ export function StudySessionTimer() {
 
     if (!activeSession) {
         return (
-            <div className="flex items-center gap-2">
-                <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={saving}
-                    onClick={() => startSession("manual", null)}
-                    className="gap-1.5"
-                >
-                    <Play className="h-4 w-4" />
-                    Seans Baslat
-                </Button>
-
-                <div className="hidden md:flex items-center gap-1.5">
-                    <select
-                        value={presetMinutes}
-                        onChange={(e) => setPresetMinutes(Number(e.target.value))}
-                        className="h-9 rounded-md border border-input bg-background px-2 text-xs outline-none"
-                    >
-                        {POMODORO_PRESETS.map((minutes) => (
-                            <option key={minutes} value={minutes}>
-                                {minutes} dk
-                            </option>
-                        ))}
-                    </select>
+            <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
                     <Button
                         variant="outline"
                         size="sm"
                         disabled={saving}
-                        onClick={() => startSession("pomodoro", presetMinutes * 60)}
+                        onClick={() => startSession("manual", null)}
                         className="gap-1.5"
                     >
-                        <Timer className="h-4 w-4" />
-                        Pomodoro
+                        <Play className="h-4 w-4" />
+                        Seans Baslat
                     </Button>
+
+                    <div className="hidden md:flex items-center gap-1.5">
+                        <select
+                            value={presetMinutes}
+                            onChange={(e) => setPresetMinutes(Number(e.target.value))}
+                            className="h-9 rounded-md border border-input bg-background px-2 text-xs outline-none"
+                        >
+                            {POMODORO_PRESETS.map((minutes) => (
+                                <option key={minutes} value={minutes}>
+                                    {minutes} dk
+                                </option>
+                            ))}
+                        </select>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={saving}
+                            onClick={() => startSession("pomodoro", presetMinutes * 60)}
+                            className="gap-1.5"
+                        >
+                            <Timer className="h-4 w-4" />
+                            Pomodoro
+                        </Button>
+                    </div>
                 </div>
+                {statusMessage && <p className="text-[11px] text-destructive">{statusMessage}</p>}
             </div>
         );
     }
@@ -187,21 +213,24 @@ export function StudySessionTimer() {
     const completion = planned > 0 ? Math.min(100, Math.round((elapsedSeconds / planned) * 100)) : null;
 
     return (
-        <div className="flex items-center gap-2">
-            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 font-medium">
-                {activeSession.source_type === "pomodoro" ? "Pomodoro" : "Seans"} {formatClockValue(elapsedSeconds)}
-                {completion !== null && <span className="ml-1">(%{completion})</span>}
+        <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+                <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 font-medium">
+                    {activeSession.source_type === "pomodoro" ? "Pomodoro" : "Seans"} {formatClockValue(elapsedSeconds)}
+                    {completion !== null && <span className="ml-1">(%{completion})</span>}
+                </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={saving}
+                    onClick={stopSession}
+                    className="gap-1.5"
+                >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                    Bitir
+                </Button>
             </div>
-            <Button
-                variant="outline"
-                size="sm"
-                disabled={saving}
-                onClick={stopSession}
-                className="gap-1.5"
-            >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-                Bitir
-            </Button>
+            {statusMessage && <p className="text-[11px] text-destructive">{statusMessage}</p>}
         </div>
     );
 }
