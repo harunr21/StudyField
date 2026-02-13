@@ -247,6 +247,7 @@ export default function NoteEditorPage() {
 
                 {/* Tiptap Editor */}
                 <TiptapEditor
+                    key={page.id}
                     content={page.content}
                     onUpdate={handleContentUpdate}
                 />

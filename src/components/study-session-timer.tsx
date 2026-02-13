@@ -9,11 +9,14 @@ import { Loader2, Timer, Square, Play } from "lucide-react";
 type ActiveSession = {
     id: string;
     started_at: string;
+    updated_at: string | null;
     source_type: "manual" | "pomodoro" | "youtube" | "pdf" | "notes";
     planned_duration_seconds: number | null;
 };
 
 const POMODORO_PRESETS = [25, 5];
+const HEARTBEAT_INTERVAL_MS = 60 * 1000; // 1 dakika
+const STALE_SESSION_THRESHOLD_MINUTES = 5; // 5 dakika boyunca heartbeat yoksa seansı kapat
 
 export function StudySessionTimer() {
     const supabase = useMemo(() => createClient(), []);
@@ -43,6 +46,34 @@ export function StudySessionTimer() {
         setElapsedSeconds(diff);
     }, []);
 
+    // Seans hala aktif mi kontrol et ve çok eskiyse kapat
+    const checkAndRecoverStaleSession = useCallback(async (session: ActiveSession) => {
+        const lastActivity = session.updated_at
+            ? new Date(session.updated_at).getTime()
+            : new Date(session.started_at).getTime();
+        const now = Date.now();
+        const minutesSinceActivity = (now - lastActivity) / 1000 / 60;
+
+        if (minutesSinceActivity > STALE_SESSION_THRESHOLD_MINUTES) {
+            console.log("Stale session detected. Auto-closing...", session.id);
+            // Seansı son bilinen aktivite zamanında bitir
+            const durationSeconds = Math.floor((lastActivity - new Date(session.started_at).getTime()) / 1000);
+
+            // Veritabanında kapat
+            await supabase
+                .from("study_sessions")
+                .update({
+                    ended_at: new Date(lastActivity).toISOString(),
+                    duration_seconds: Math.max(0, durationSeconds)
+                })
+                .eq("id", session.id);
+
+            setStatusMessage("Onceki yarim kalan seans (uzun sure islem yapilmadigi icin) otomatik kapatildi.");
+            return null; // Artık aktif değil
+        }
+        return session; // Hala taze
+    }, [supabase]);
+
     const loadActiveSession = useCallback(async () => {
         setLoading(true);
         setStatusMessage(null);
@@ -59,7 +90,7 @@ export function StudySessionTimer() {
 
         const { data, error } = await supabase
             .from("study_sessions")
-            .select("id,started_at,source_type,planned_duration_seconds")
+            .select("id,started_at,updated_at,source_type,planned_duration_seconds")
             .eq("user_id", user.id)
             .is("ended_at", null)
             .order("started_at", { ascending: false })
@@ -81,11 +112,32 @@ export function StudySessionTimer() {
             return;
         }
 
-        const session = data as ActiveSession;
-        setActiveSession(session);
-        syncElapsed(session.started_at);
+        let session = data as ActiveSession;
+
+        // Stale check
+        const recoveredSession = await checkAndRecoverStaleSession(session);
+        if (!recoveredSession) {
+            setActiveSession(null);
+            setElapsedSeconds(0);
+        } else {
+            setActiveSession(recoveredSession);
+            syncElapsed(recoveredSession.started_at);
+        }
+
         setLoading(false);
-    }, [supabase, syncElapsed]);
+    }, [supabase, syncElapsed, checkAndRecoverStaleSession]);
+
+    // Heartbeat gönderen fonksiyon
+    const sendHeartbeat = useCallback(async (sessionId: string) => {
+        const now = new Date().toISOString();
+        await supabase
+            .from("study_sessions")
+            .update({ updated_at: now })
+            .eq("id", sessionId);
+
+        // Yerel state'i de guncelle ki 'stale' kontrolune takilmasin (gerci loadActiveSession'da yapiliyor ama olsun)
+        setActiveSession(prev => prev?.id === sessionId ? { ...prev, updated_at: now } : prev);
+    }, [supabase]);
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -96,11 +148,22 @@ export function StudySessionTimer() {
         if (!activeSession) return;
         // eslint-disable-next-line react-hooks/set-state-in-effect
         syncElapsed(activeSession.started_at);
+
+        // UI Timer
         const interval = setInterval(() => {
             syncElapsed(activeSession.started_at);
         }, 1000);
-        return () => clearInterval(interval);
-    }, [activeSession, syncElapsed]);
+
+        // Heartbeat Timer
+        const heartbeatInterval = setInterval(() => {
+            sendHeartbeat(activeSession.id);
+        }, HEARTBEAT_INTERVAL_MS);
+
+        return () => {
+            clearInterval(interval);
+            clearInterval(heartbeatInterval);
+        };
+    }, [activeSession, syncElapsed, sendHeartbeat]);
 
     const requestNotificationPermission = async () => {
         if (typeof window === "undefined" || !("Notification" in window)) return;
@@ -130,9 +193,10 @@ export function StudySessionTimer() {
                 user_id: user.id,
                 source_type: sourceType,
                 started_at: startedAt,
+                updated_at: startedAt, // Ilk baslangic update zamani
                 planned_duration_seconds: plannedSeconds,
             })
-            .select("id,started_at,source_type,planned_duration_seconds")
+            .select("id,started_at,updated_at,source_type,planned_duration_seconds")
             .single();
 
         if (!error && data) {
@@ -326,3 +390,4 @@ export function StudySessionTimer() {
         </div>
     );
 }
+

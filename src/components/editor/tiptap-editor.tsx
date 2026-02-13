@@ -170,15 +170,9 @@ export function TiptapEditor({
         },
     });
 
-    // Update editor content when prop changes externally
-    useEffect(() => {
-        if (editor && content && Object.keys(content).length > 0) {
-            const currentContent = editor.getJSON();
-            if (JSON.stringify(currentContent) !== JSON.stringify(content)) {
-                editor.commands.setContent(content);
-            }
-        }
-    }, [content, editor]);
+    // Update editor content when prop changes externally -> REMOVED to prevent overwriting user input on parent re-renders
+    // We rely on key={pageId} in the parent to force re-mount on note change
+
 
     const handleSlashCommand = useCallback(
         (command: string) => {

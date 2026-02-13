@@ -1,0 +1,110 @@
+StudyField - Performans ve Guvenlik Analiz Raporu
+Tarih: 13 Subat 2026
+
+Genel Sonuc
+Proje islevsel ama hem guvenlik hem performans tarafinda kritik mimari riskler var.
+En yuksek riskler:
+- YouTube API anahtarinin istemciye acik olmasi
+- PDF dosyalarinin public URL ile saklanmasi
+- Auth'lu sayfalarin Service Worker tarafindan cache'lenmesi
+
+Kritik Bulgular (Oncelik Sirasi)
+
+[Yuksek | Guvenlik]
+- YouTube API anahtari istemci tarafinda kullaniliyor, key ifsa/istismar riski var.
+- Referanslar:
+  - src/lib/youtube.ts:7
+  - src/lib/youtube.ts:84
+
+[Yuksek | Guvenlik/Veri]
+- PDF dosyalari getPublicUrl ile public linke cevriliyor; hassas dokumanlar link bilen herkesce acilabilir.
+- Referanslar:
+  - src/app/(dashboard)/pdf/page.tsx:186
+  - src/app/(dashboard)/pdf/page.tsx:200
+  - supabase/migrate_pdf.sql:145
+
+[Yuksek | Guvenlik/Veri]
+- Service Worker tum sayfalari (pages, pages-rsc) cache'liyor; auth'lu icerik shared cihazlarda kalabilir.
+- Referans:
+  - public/sw.js:1
+
+[Orta | Guvenlik]
+- window.open(..., "_blank") cagirilari noopener,noreferrer olmadan kullaniliyor (tabnabbing riski).
+- Referanslar:
+  - src/app/(dashboard)/youtube/page.tsx:493
+  - src/app/(dashboard)/youtube/[id]/page.tsx:580
+  - src/app/(dashboard)/youtube/[id]/watch/[videoId]/page.tsx:574
+  - src/app/(dashboard)/pdf/[id]/page.tsx:613
+
+[Orta | Guvenlik]
+- Auth callback next paramini dogrudan redirect ediyor; path dogrulamasi yok.
+- Referanslar:
+  - src/app/auth/callback/route.ts:7
+  - src/app/auth/callback/route.ts:13
+
+Performans Darbogazlari
+
+[Yuksek]
+- createClient() bazi sayfalarda her render'da yeniden olusuyor; effect dongusu/re-subscribe/fazla sorgu riski.
+- Referanslar:
+  - src/components/notes/notes-list.tsx:30
+  - src/components/notes/notes-list.tsx:47
+  - src/app/(dashboard)/notes/[id]/page.tsx:24
+  - src/app/(dashboard)/notes/[id]/page.tsx:44
+
+[Yuksek]
+- Cok yerde .select("*") var; gereksiz payload tasiniyor (ozellikle content JSON).
+- Referanslar:
+  - src/app/(dashboard)/notes/page.tsx:11
+  - src/components/notes/notes-list.tsx:36
+  - src/app/(dashboard)/pdf/page.tsx:99
+  - src/app/(dashboard)/youtube/page.tsx:80
+  - src/app/(dashboard)/sessions/page.tsx:52
+
+[Yuksek]
+- YouTube senkronizasyonunda tek tek delete/update yapiliyor; buyuk playlistte N adet round-trip.
+- Referanslar:
+  - src/app/(dashboard)/youtube/[id]/page.tsx:212
+  - src/app/(dashboard)/youtube/[id]/page.tsx:243
+
+[Orta]
+- Stats ekrani tek acilista cok sayida sorgu + client-side agregasyon yapiyor.
+- Referans:
+  - src/app/(dashboard)/stats/page.tsx:107
+
+[Orta]
+- Global search FTS dusunce 100 not icerigi cekip client'ta filtreliyor; keystroke basina pahali.
+- Referanslar:
+  - src/lib/global-search.ts:95
+  - src/lib/global-search.ts:98
+  - src/components/search/global-search-dialog.tsx:91
+
+[Orta]
+- Dashboard layout mounted bekledigi icin dashboard SSR faydasini geciktiriyor.
+- Referanslar:
+  - src/components/dashboard-layout.tsx:21
+  - src/components/dashboard-layout.tsx:39
+
+[Orta]
+- PWA + middleware birlesiminde route/matcher kapsami genis; statik bazi rotalarda gereksiz auth kontrol yuku olabilir.
+- Referans:
+  - src/proxy.ts:68
+
+Olcum Ozeti
+- next build uretim derlemesi basarili.
+- .next/static toplami: yaklasik 2,780,903 byte.
+- En buyuk chunk'lar: ~394 KB, ~382 KB.
+- En buyuk server app dosyalari:
+  - notes/[id] ~582 KB
+  - pdf/[id] ~453 KB
+- eslint: 8 error, 98 warning (React set-state-in-effect, ref/purity ve generated SW dosyalari dahil).
+- npm audit: ag kisiti nedeniyle advisory endpoint'e erisemedi.
+
+Oncelikli Aksiyon Plani
+1) YouTube API cagrilarini server route'a tasi, NEXT_PUBLIC_YOUTUBE_API_KEY kullanimini kaldir.
+2) PDF bucket'i private yap, goruntuleme/indirme icin kisa omurlu signed URL kullan.
+3) Auth'lu sayfalari SW runtime cache'inden cikar (pages, pages-rsc stratejilerini daralt).
+4) notes/pdf/youtube listelerinde select("*") yerine kolon bazli secim + pagination ekle.
+5) notes-list ve notes/[id] tarafinda Supabase client'i useMemo ile sabitle.
+6) YouTube sync'i toplu upsert + toplu delete in(...) ile az sorguya indir.
+7) Stats/search icin RPC veya materialized view ile server-side agregasyon kullan.

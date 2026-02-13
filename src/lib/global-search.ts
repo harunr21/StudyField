@@ -45,39 +45,41 @@ function extractText(value: unknown): string {
     return "";
 }
 
-async function fetchRowsWithFts(supabase: SupabaseClient, q: string): Promise<SearchRows> {
+async function fetchRowsWithFts(supabase: SupabaseClient, q: string, searchType: "websearch" | "plain" = "websearch"): Promise<SearchRows> {
+    const config = "turkish";
     const [pagesRes, videosRes, videoNotesRes, pdfDocsRes, pdfNotesRes] = await Promise.all([
         supabase
             .from("pages")
             .select("id,title,content")
             .eq("is_archived", false)
-            .textSearch("search_vector", q, { type: "websearch", config: "simple" })
+            .textSearch("search_vector", q, { type: searchType, config })
             .limit(8),
         supabase
             .from("youtube_videos")
             .select("id,title,playlist_ref_id")
-            .textSearch("search_vector", q, { type: "websearch", config: "simple" })
+            .textSearch("search_vector", q, { type: searchType, config })
             .limit(5),
         supabase
             .from("youtube_video_notes")
             .select("id,content,timestamp_seconds,video_ref_id")
-            .textSearch("search_vector", q, { type: "websearch", config: "simple" })
+            .textSearch("search_vector", q, { type: searchType, config })
             .limit(5),
         supabase
             .from("pdf_documents")
             .select("id,title")
             .eq("is_archived", false)
-            .textSearch("search_vector", q, { type: "websearch", config: "simple" })
+            .textSearch("search_vector", q, { type: searchType, config })
             .limit(5),
         supabase
             .from("pdf_notes")
             .select("id,content,page_number,pdf_ref_id")
-            .textSearch("search_vector", q, { type: "websearch", config: "simple" })
+            .textSearch("search_vector", q, { type: searchType, config })
             .limit(5),
     ]);
 
     const hasError = pagesRes.error || videosRes.error || videoNotesRes.error || pdfDocsRes.error || pdfNotesRes.error;
     if (hasError) {
+        // Hata durumunda bunu firlat ki fallback devreye girsin
         throw new Error("fts_not_available");
     }
 
@@ -135,13 +137,28 @@ export async function searchWorkspace(
     const q = query.trim();
     if (q.length < 2) return [];
 
-    const rows = await (async () => {
-        try {
-            return await fetchRowsWithFts(supabase, q);
-        } catch {
-            return await fetchRowsWithIlikeFallback(supabase, q);
+    let rows: SearchRows;
+    try {
+        // 1. Once akilli arama (websearch) dene. Kelime koklerine bakar.
+        rows = await fetchRowsWithFts(supabase, q, "websearch");
+
+        // Eger websearch bos donerse (stop words yuzunden olabilir: 'cok', 've' gibi),
+        // 'plain' aramasi ile tekrar dene.
+        const isEmpty =
+            rows.pages.length === 0 &&
+            rows.videos.length === 0 &&
+            rows.videoNotes.length === 0 &&
+            rows.pdfDocuments.length === 0 &&
+            rows.pdfNotes.length === 0;
+
+        if (isEmpty) {
+            rows = await fetchRowsWithFts(supabase, q, "plain");
         }
-    })();
+
+    } catch {
+        // FTS tamamen patlarsa (syntax hatasi vs), ilike ile kurtar
+        rows = await fetchRowsWithIlikeFallback(supabase, q);
+    }
 
     const videoIds = [...new Set(rows.videoNotes.map((note) => note.video_ref_id))];
     const pdfIds = [...new Set(rows.pdfNotes.map((note) => note.pdf_ref_id))];
@@ -221,3 +238,4 @@ export async function searchWorkspace(
 
     return items.slice(0, 25);
 }
+
