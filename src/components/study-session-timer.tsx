@@ -25,6 +25,7 @@ export function StudySessionTimer() {
     const [presetMinutes, setPresetMinutes] = useState(25);
     const [useCustomMinutes, setUseCustomMinutes] = useState(false);
     const [customMinutes, setCustomMinutes] = useState(30);
+    const [isManualMode, setIsManualMode] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">(() => {
         if (typeof window === "undefined") return "default";
@@ -33,6 +34,7 @@ export function StudySessionTimer() {
     });
     const notifiedSessionIdRef = useRef<string | null>(null);
     const autoStoppingSessionIdRef = useRef<string | null>(null);
+    const autoStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const syncElapsed = useCallback((startedAt: string) => {
         const started = new Date(startedAt).getTime();
@@ -146,7 +148,7 @@ export function StudySessionTimer() {
         setSaving(false);
     };
 
-    const stopSession = useCallback(async (options?: { completionMessage?: string; durationSeconds?: number }) => {
+    const stopSession = useCallback(async (options?: { completionMessage?: string; durationSeconds?: number; isAutoStop?: boolean }) => {
         if (!activeSession || saving) return;
         setSaving(true);
         if (!options?.completionMessage) {
@@ -164,22 +166,32 @@ export function StudySessionTimer() {
 
         if (error) {
             setStatusMessage(error.message ?? "Seans bitirilemedi.");
+            if (options?.isAutoStop) {
+                notifiedSessionIdRef.current = null;
+                autoStoppingSessionIdRef.current = null;
+            }
             setSaving(false);
             return;
         }
 
         setStatusMessage(options?.completionMessage ?? null);
         setActiveSession(null);
+        if (autoStopTimeoutRef.current) {
+            clearTimeout(autoStopTimeoutRef.current);
+            autoStopTimeoutRef.current = null;
+        }
         notifiedSessionIdRef.current = null;
         autoStoppingSessionIdRef.current = null;
         setElapsedSeconds(0);
         setSaving(false);
     }, [activeSession, elapsedSeconds, saving, supabase]);
 
+
+
     useEffect(() => {
-        if (!activeSession || activeSession.source_type !== "pomodoro") return;
-        const planned = activeSession.planned_duration_seconds;
-        if (!planned || planned <= 0) return;
+        if (!activeSession) return;
+        const planned = Number(activeSession.planned_duration_seconds ?? 0);
+        if (!Number.isFinite(planned) || planned <= 0) return;
         if (elapsedSeconds < planned) return;
         if (notifiedSessionIdRef.current === activeSession.id) return;
         if (autoStoppingSessionIdRef.current === activeSession.id) return;
@@ -187,17 +199,17 @@ export function StudySessionTimer() {
         notifiedSessionIdRef.current = activeSession.id;
         autoStoppingSessionIdRef.current = activeSession.id;
 
-        let completionMessage = "Pomodoro tamamlandi. Seans otomatik bitirildi.";
+        let completionMessage = "Planlanan sure doldu. Seans otomatik bitirildi.";
         if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-            new Notification("Pomodoro tamamlandi", {
+            new Notification("Seans tamamlandi", {
                 body: "Sure doldu. Seans otomatik bitirildi.",
             });
         } else {
-            completionMessage = "Pomodoro suresi doldu. Seans otomatik bitirildi.";
+            completionMessage = "Seans suresi doldu. Seans otomatik bitirildi.";
         }
 
         setTimeout(() => {
-            void stopSession({ completionMessage, durationSeconds: planned });
+            void stopSession({ completionMessage, durationSeconds: planned, isAutoStop: true });
         }, 0);
     }, [activeSession, elapsedSeconds, stopSession]);
 
@@ -214,30 +226,27 @@ export function StudySessionTimer() {
         return (
             <div className="flex flex-col items-end gap-1">
                 <div className="flex items-center gap-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={saving}
-                        onClick={() => startSession("manual", null)}
-                        className="gap-1.5"
-                    >
-                        <Play className="h-4 w-4" />
-                        Seans Baslat
-                    </Button>
-
-                    <div className="hidden md:flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5">
                         <select
-                            value={useCustomMinutes ? "custom" : String(presetMinutes)}
+                            value={isManualMode ? "manual" : useCustomMinutes ? "custom" : String(presetMinutes)}
                             onChange={(e) => {
-                                if (e.target.value === "custom") {
+                                const val = e.target.value;
+                                if (val === "manual") {
+                                    setIsManualMode(true);
+                                    setUseCustomMinutes(false);
+                                    return;
+                                }
+                                setIsManualMode(false);
+                                if (val === "custom") {
                                     setUseCustomMinutes(true);
                                     return;
                                 }
                                 setUseCustomMinutes(false);
-                                setPresetMinutes(Number(e.target.value));
+                                setPresetMinutes(Number(val));
                             }}
                             className="h-9 rounded-md border border-input bg-background px-2 text-xs outline-none"
                         >
+                            <option value="manual">Serbest</option>
                             {POMODORO_PRESETS.map((minutes) => (
                                 <option key={minutes} value={minutes}>
                                     {minutes} dk
@@ -245,7 +254,7 @@ export function StudySessionTimer() {
                             ))}
                             <option value="custom">Ozel</option>
                         </select>
-                        {useCustomMinutes && (
+                        {useCustomMinutes && !isManualMode && (
                             <input
                                 type="number"
                                 min={1}
@@ -261,6 +270,11 @@ export function StudySessionTimer() {
                             size="sm"
                             disabled={saving}
                             onClick={async () => {
+                                if (isManualMode) {
+                                    await startSession("manual", null);
+                                    return;
+                                }
+
                                 if (notificationPermission === "default") {
                                     await requestNotificationPermission();
                                 }
@@ -271,8 +285,8 @@ export function StudySessionTimer() {
                             }}
                             className="gap-1.5"
                         >
-                            <Timer className="h-4 w-4" />
-                            Pomodoro
+                            {isManualMode ? <Play className="h-4 w-4" /> : <Timer className="h-4 w-4" />}
+                            Baslat
                         </Button>
                     </div>
                 </div>
@@ -285,13 +299,14 @@ export function StudySessionTimer() {
     }
 
     const planned = activeSession.planned_duration_seconds ?? 0;
-    const completion = planned > 0 ? Math.min(100, Math.round((elapsedSeconds / planned) * 100)) : null;
+    const clampedElapsedSeconds = planned > 0 ? Math.min(elapsedSeconds, planned) : elapsedSeconds;
+    const completion = planned > 0 ? Math.min(100, Math.round((clampedElapsedSeconds / planned) * 100)) : null;
 
     return (
         <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
                 <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 font-medium">
-                    {activeSession.source_type === "pomodoro" ? "Pomodoro" : "Seans"} {formatClockValue(elapsedSeconds)}
+                    {activeSession.source_type === "pomodoro" ? "Pomodoro" : "Seans"} {formatClockValue(clampedElapsedSeconds)}
                     {completion !== null && <span className="ml-1">(%{completion})</span>}
                 </div>
                 <Button
