@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist } from "@/lib/supabase/types";
+import { formatClockValue, parseDurationToSeconds } from "@/lib/dashboard-stats";
 import {
     extractPlaylistId,
     fetchPlaylistInfo,
@@ -37,6 +38,7 @@ import {
     ListVideo,
     CheckCircle2,
     Clock,
+    CalendarDays,
     Play,
     AlertCircle,
     KeyRound,
@@ -54,7 +56,7 @@ function formatDate(dateString: string) {
 
 export default function YoutubePage() {
     const [playlists, setPlaylists] = useState<YoutubePlaylist[]>([]);
-    const [videoStats, setVideoStats] = useState<Record<string, { total: number; watched: number }>>({});
+    const [videoStats, setVideoStats] = useState<Record<string, { total: number; watched: number; durationSeconds: number }>>({});
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -108,15 +110,15 @@ export default function YoutubePage() {
                 if (playlistIds.length > 0) {
                     const { data: allVideos } = await supabase
                         .from("youtube_videos")
-                        .select("playlist_ref_id, is_watched")
+                        .select("playlist_ref_id, is_watched, duration")
                         .in("playlist_ref_id", playlistIds);
 
                     if (!cancelled) {
-                        const stats: Record<string, { total: number; watched: number }> = {};
+                        const stats: Record<string, { total: number; watched: number; durationSeconds: number }> = {};
 
                         // Initialize stats for all playlists
                         for (const id of playlistIds) {
-                            stats[id] = { total: 0, watched: 0 };
+                            stats[id] = { total: 0, watched: 0, durationSeconds: 0 };
                         }
 
                         if (allVideos) {
@@ -127,6 +129,7 @@ export default function YoutubePage() {
                                     if (video.is_watched) {
                                         stats[plId].watched++;
                                     }
+                                    stats[plId].durationSeconds += parseDurationToSeconds(video.duration ?? "");
                                 }
                             }
                         }
@@ -446,7 +449,7 @@ export default function YoutubePage() {
             {!loading && filteredPlaylists.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredPlaylists.map((playlist) => {
-                        const stats = videoStats[playlist.id] || { total: 0, watched: 0 };
+                        const stats = videoStats[playlist.id] || { total: 0, watched: 0, durationSeconds: 0 };
                         const progress = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0;
 
                         return (
@@ -543,6 +546,10 @@ export default function YoutubePage() {
                                                 <ListVideo className="h-3.5 w-3.5" />
                                                 {stats.total} video
                                             </span>
+                                            <span className="flex items-center gap-1">
+                                                <Clock className="h-3.5 w-3.5" />
+                                                {formatClockValue(stats.durationSeconds)}
+                                            </span>
                                             {stats.watched > 0 && (
                                                 <span className="flex items-center gap-1 text-emerald-500">
                                                     <CheckCircle2 className="h-3.5 w-3.5" />
@@ -551,7 +558,7 @@ export default function YoutubePage() {
                                             )}
                                         </div>
                                         <span className="flex items-center gap-1">
-                                            <Clock className="h-3 w-3" />
+                                            <CalendarDays className="h-3 w-3" />
                                             {formatDate(playlist.created_at)}
                                         </span>
                                     </div>

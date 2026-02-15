@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist, YoutubeVideo } from "@/lib/supabase/types";
 import { fetchPlaylistVideos, fetchPlaylistInfo } from "@/lib/youtube";
+import { formatClockValue, parseDurationToSeconds } from "@/lib/dashboard-stats";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -334,6 +335,10 @@ export default function PlaylistDetailPage() {
         () => videos.length > 0 ? Math.round((watchedCount / videos.length) * 100) : 0,
         [watchedCount, videos.length]
     );
+    const totalDurationSeconds = useMemo(
+        () => videos.reduce((total, video) => total + parseDurationToSeconds(video.duration ?? ""), 0),
+        [videos]
+    );
     const titleListText = useMemo(() => videos.map((video) => video.title).join("\n"), [videos]);
 
     const copyTitles = useCallback(async () => {
@@ -417,7 +422,7 @@ export default function PlaylistDetailPage() {
                         )}
 
                         {/* Stats */}
-                        <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                             <div className="bg-card/50 rounded-xl p-3 border border-border/50 text-center">
                                 <p className="text-xl font-bold text-red-400">{videos.length}</p>
                                 <p className="text-xs text-muted-foreground">Video</p>
@@ -431,6 +436,10 @@ export default function PlaylistDetailPage() {
                                     %{progress}
                                 </p>
                                 <p className="text-xs text-muted-foreground">İlerleme</p>
+                            </div>
+                            <div className="bg-card/50 rounded-xl p-3 border border-border/50 text-center">
+                                <p className="text-xl font-bold text-sky-400">{formatClockValue(totalDurationSeconds)}</p>
+                                <p className="text-xs text-muted-foreground">Süre</p>
                             </div>
                         </div>
 
