@@ -67,7 +67,25 @@ export default function YoutubePage() {
     const supabase = useMemo(() => createClient(), []);
 
     useEffect(() => {
-        setApiConfigured(isYoutubeApiConfigured());
+        let cancelled = false;
+
+        const checkApiConfig = async () => {
+            try {
+                const configured = await isYoutubeApiConfigured();
+                if (!cancelled) {
+                    setApiConfigured(configured);
+                }
+            } catch {
+                if (!cancelled) {
+                    setApiConfigured(false);
+                }
+            }
+        };
+
+        checkApiConfig();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     // Initial data fetch
@@ -281,7 +299,7 @@ export default function YoutubePage() {
                             <div className="text-sm text-muted-foreground">
                                 <code className="bg-muted px-2 py-0.5 rounded text-xs">.env.local</code> dosyasına API anahtarını ekleyin:
                                 <pre className="bg-muted rounded-lg p-3 mt-2 text-xs overflow-x-auto">
-                                    NEXT_PUBLIC_YOUTUBE_API_KEY=AIzaSy...
+                                    YOUTUBE_API_KEY=AIzaSy...
                                 </pre>
                             </div>
                         </div>
