@@ -8,6 +8,14 @@ import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import {
     ArrowLeft,
     Youtube,
     Search,
@@ -22,6 +30,7 @@ import {
     ListVideo,
     MoreHorizontal,
     RefreshCw,
+    Copy,
 } from "lucide-react";
 import {
     DropdownMenu,
@@ -44,6 +53,8 @@ export default function PlaylistDetailPage() {
     const [filter, setFilter] = useState<"all" | "watched" | "unwatched">("all");
     const [syncing, setSyncing] = useState(false);
     const [syncMessage, setSyncMessage] = useState("");
+    const [titleDialogOpen, setTitleDialogOpen] = useState(false);
+    const [copyState, setCopyState] = useState<"idle" | "success" | "error">("idle");
 
     // Initial data fetch
     useEffect(() => {
@@ -323,6 +334,37 @@ export default function PlaylistDetailPage() {
         () => videos.length > 0 ? Math.round((watchedCount / videos.length) * 100) : 0,
         [watchedCount, videos.length]
     );
+    const titleListText = useMemo(() => videos.map((video) => video.title).join("\n"), [videos]);
+
+    const copyTitles = useCallback(async () => {
+        if (!titleListText) return;
+
+        try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+                await navigator.clipboard.writeText(titleListText);
+            } else {
+                const textArea = document.createElement("textarea");
+                textArea.value = titleListText;
+                textArea.style.position = "fixed";
+                textArea.style.opacity = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                const copied = document.execCommand("copy");
+                document.body.removeChild(textArea);
+
+                if (!copied) {
+                    throw new Error("copy_failed");
+                }
+            }
+
+            setCopyState("success");
+            setTimeout(() => setCopyState("idle"), 2000);
+        } catch {
+            setCopyState("error");
+            setTimeout(() => setCopyState("idle"), 2500);
+        }
+    }, [titleListText]);
 
     if (initialLoading) {
         return (
@@ -449,6 +491,54 @@ export default function PlaylistDetailPage() {
                         <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
                         Yenile
                     </Button>
+
+                    <Dialog
+                        open={titleDialogOpen}
+                        onOpenChange={(open) => {
+                            setTitleDialogOpen(open);
+                            if (!open) {
+                                setCopyState("idle");
+                            }
+                        }}
+                    >
+                        <DialogTrigger asChild>
+                            <Button size="sm" variant="outline" className="gap-1.5">
+                                <Copy className="h-4 w-4" />
+                                Başlıkları Kopyala
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-lg">
+                            <DialogHeader>
+                                <DialogTitle>Video Başlıkları</DialogTitle>
+                                <DialogDescription>
+                                    Başlıklar alt alta listelendi. Tek tıkla tamamını panoya kopyalayabilirsiniz.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-3">
+                                <div className="max-h-[50vh] overflow-y-auto rounded-md border bg-card/60 p-3">
+                                    {titleListText ? (
+                                        <pre className="text-sm leading-relaxed whitespace-pre-wrap break-words font-sans">
+                                            {titleListText}
+                                        </pre>
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground">Henüz video başlığı bulunmuyor.</p>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2">
+                                    <Button onClick={copyTitles} disabled={!titleListText} className="gap-1.5">
+                                        <Copy className="h-4 w-4" />
+                                        {copyState === "success" ? "Kopyalandı" : "Hepsini Kopyala"}
+                                    </Button>
+                                    {copyState === "error" && (
+                                        <span className="text-xs text-destructive">
+                                            Kopyalama başarısız. Tekrar deneyin.
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
                 </div>
             </div>
 
