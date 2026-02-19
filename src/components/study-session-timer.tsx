@@ -40,6 +40,8 @@ export function StudySessionTimer() {
     const notifiedSessionIdRef = useRef<string | null>(null);
     const autoStoppingSessionIdRef = useRef<string | null>(null);
     const autoStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const helperMessage = statusMessage
+        ?? (notificationPermission === "unsupported" ? "Tarayici bildirimi desteklenmiyor." : null);
 
     const syncElapsed = useCallback((startedAt: string) => {
         const started = new Date(startedAt).getTime();
@@ -295,8 +297,8 @@ export function StudySessionTimer() {
 
     if (!activeSession) {
         return (
-            <div className="flex flex-col items-end gap-1">
-                <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 items-center gap-1.5 rounded-xl border border-border/60 bg-card/40 p-1">
                     <div className="flex items-center gap-1.5">
                         <select
                             value={isManualMode ? "manual" : useCustomMinutes ? "custom" : String(presetMinutes)}
@@ -315,7 +317,7 @@ export function StudySessionTimer() {
                                 setUseCustomMinutes(false);
                                 setPresetMinutes(Number(val));
                             }}
-                            className="h-9 rounded-md border border-input bg-background px-2 text-xs outline-none"
+                            className="h-8 rounded-md border border-input/70 bg-background px-2 text-xs outline-none"
                         >
                             <option value="manual">Serbest</option>
                             {POMODORO_PRESETS.map((minutes) => (
@@ -332,10 +334,19 @@ export function StudySessionTimer() {
                                 max={180}
                                 value={customMinutes}
                                 onChange={(e) => setCustomMinutes(Number(e.target.value) || 1)}
-                                className="h-9 w-20 rounded-md border border-input bg-background px-2 text-xs outline-none"
+                                className="h-8 w-16 rounded-md border border-input/70 bg-background px-2 text-xs outline-none"
                                 aria-label="Ozel pomodoro suresi"
                             />
                         )}
+                        <input
+                            type="text"
+                            value={sessionTag}
+                            onChange={(e) => setSessionTag(e.target.value)}
+                            maxLength={60}
+                            placeholder="Etiket"
+                            className="h-8 w-24 sm:w-28 md:w-36 lg:w-40 rounded-md border border-input/70 bg-background px-2 text-xs outline-none"
+                            aria-label="Seans etiketi"
+                        />
                         <Button
                             variant="outline"
                             size="sm"
@@ -357,26 +368,23 @@ export function StudySessionTimer() {
                                     : presetMinutes;
                                 await startSession("pomodoro", selectedMinutes * 60, tagValue);
                             }}
-                            className="gap-1.5"
+                            className="h-8 gap-1.5"
                         >
                             {isManualMode ? <Play className="h-4 w-4" /> : <Timer className="h-4 w-4" />}
                             Baslat
                         </Button>
                     </div>
                 </div>
-                <input
-                    type="text"
-                    value={sessionTag}
-                    onChange={(e) => setSessionTag(e.target.value)}
-                    maxLength={60}
-                    placeholder="Etiket (opsiyonel)"
-                    className="h-9 w-full max-w-[220px] rounded-md border border-input bg-background px-2 text-xs outline-none"
-                    aria-label="Seans etiketi"
-                />
-                {notificationPermission === "unsupported" && (
-                    <p className="text-[11px] text-muted-foreground">Tarayici bildirimi desteklemiyor.</p>
+                {helperMessage && (
+                    <p
+                        className={`hidden xl:block max-w-[220px] truncate text-[11px] ${
+                            statusMessage ? "text-destructive" : "text-muted-foreground"
+                        }`}
+                        title={helperMessage}
+                    >
+                        {helperMessage}
+                    </p>
                 )}
-                {statusMessage && <p className="text-[11px] text-destructive">{statusMessage}</p>}
             </div>
         );
     }
@@ -386,8 +394,8 @@ export function StudySessionTimer() {
     const completion = planned > 0 ? Math.min(100, Math.round((clampedElapsedSeconds / planned) * 100)) : null;
 
     return (
-        <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-1">
                 {activeSession.tag && (
                     <div className="max-w-[180px] truncate rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-600 font-medium">
                         {activeSession.tag}
@@ -410,7 +418,11 @@ export function StudySessionTimer() {
                     Bitir
                 </Button>
             </div>
-            {statusMessage && <p className="text-[11px] text-destructive">{statusMessage}</p>}
+            {statusMessage && (
+                <p className="hidden xl:block max-w-[220px] truncate text-[11px] text-destructive" title={statusMessage}>
+                    {statusMessage}
+                </p>
+            )}
         </div>
     );
 }

@@ -52,10 +52,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/50 px-4 backdrop-blur-sm bg-background/80">
                         <SidebarTrigger className="-ml-1" />
                         <Separator orientation="vertical" className="mr-2 !h-4" />
-                        <div className="flex-1" />
-                        <StudySessionTimer />
-                        <GlobalSearchDialog />
-                        <ModeToggle />
+                        <div className="ml-auto flex min-w-0 items-center gap-2">
+                            <StudySessionTimer />
+                            <GlobalSearchDialog />
+                            <ModeToggle />
+                        </div>
                     </header>
                     <main className="flex-1 overflow-auto">
                         {children}
