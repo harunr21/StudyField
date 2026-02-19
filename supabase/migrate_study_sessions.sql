@@ -27,13 +27,32 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   planned_duration_seconds INTEGER,
   focus_score SMALLINT,
   notes TEXT DEFAULT '',
+  tag TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT study_sessions_source_type_check CHECK (source_type IN ('manual', 'pomodoro', 'youtube', 'pdf', 'notes')),
   CONSTRAINT study_sessions_duration_check CHECK (duration_seconds >= 0),
   CONSTRAINT study_sessions_planned_duration_check CHECK (planned_duration_seconds IS NULL OR planned_duration_seconds > 0),
+  CONSTRAINT study_sessions_tag_length_check CHECK (tag IS NULL OR char_length(tag) <= 60),
   CONSTRAINT study_sessions_focus_score_check CHECK (focus_score IS NULL OR (focus_score >= 1 AND focus_score <= 5))
 );
+
+ALTER TABLE study_sessions
+  ADD COLUMN IF NOT EXISTS tag TEXT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'study_sessions_tag_length_check'
+      AND conrelid = 'study_sessions'::regclass
+  ) THEN
+    ALTER TABLE study_sessions
+      ADD CONSTRAINT study_sessions_tag_length_check
+      CHECK (tag IS NULL OR char_length(tag) <= 60);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_study_sessions_user_started ON study_sessions(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_study_sessions_active ON study_sessions(user_id, ended_at);

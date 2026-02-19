@@ -367,11 +367,13 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   planned_duration_seconds INTEGER,
   focus_score SMALLINT,
   notes TEXT DEFAULT '',
+  tag TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CHECK (source_type IN ('manual', 'pomodoro', 'youtube', 'pdf', 'notes')),
   CHECK (duration_seconds >= 0),
   CHECK (planned_duration_seconds IS NULL OR planned_duration_seconds > 0),
+  CHECK (tag IS NULL OR char_length(tag) <= 60),
   CHECK (focus_score IS NULL OR (focus_score >= 1 AND focus_score <= 5))
 );
 
@@ -401,4 +403,3 @@ CREATE TRIGGER update_study_sessions_updated_at
   BEFORE UPDATE ON study_sessions
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
-

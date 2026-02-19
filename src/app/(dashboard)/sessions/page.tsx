@@ -83,6 +83,7 @@ export default function SessionsPage() {
         const q = query.toLowerCase();
         return (
             session.source_type.toLowerCase().includes(q) ||
+            (session.tag || "").toLowerCase().includes(q) ||
             (session.notes || "").toLowerCase().includes(q)
         );
     });
@@ -137,7 +138,7 @@ export default function SessionsPage() {
                     <Input
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Kaynak tipi veya notta ara..."
+                        placeholder="Kaynak tipi, etiket veya notta ara..."
                         className="pl-9"
                     />
                 </div>
@@ -188,9 +189,10 @@ export default function SessionsPage() {
                     <div className="grid grid-cols-12 gap-2 px-4 py-3 text-xs text-muted-foreground border-b border-border/50 bg-card/40">
                         <div className="col-span-3">Baslangic</div>
                         <div className="col-span-2">Durum</div>
-                        <div className="col-span-2">Tip</div>
+                        <div className="col-span-1">Tip</div>
+                        <div className="col-span-2">Etiket</div>
                         <div className="col-span-2 text-right">Sure</div>
-                        <div className="col-span-2">Not</div>
+                        <div className="col-span-1">Not</div>
                         <div className="col-span-1 text-right">Islem</div>
                     </div>
                     {filtered.map((session) => (
@@ -210,9 +212,18 @@ export default function SessionsPage() {
                                     </span>
                                 )}
                             </div>
-                            <div className="col-span-2 capitalize">{session.source_type}</div>
+                            <div className="col-span-1 capitalize truncate">{session.source_type}</div>
+                            <div className="col-span-2">
+                                {session.tag ? (
+                                    <span className="inline-flex rounded-full px-2 py-0.5 text-xs bg-sky-500/10 text-sky-600 truncate max-w-full">
+                                        {session.tag}
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                )}
+                            </div>
                             <div className="col-span-2 text-right font-medium">{formatClockValue(resolveDuration(session))}</div>
-                            <div className="col-span-2 text-muted-foreground truncate">{session.notes || "-"}</div>
+                            <div className="col-span-1 text-muted-foreground truncate">{session.notes || "-"}</div>
                             <div className="col-span-1 flex justify-end">
                                 <button
                                     onClick={() => deleteSession(session)}

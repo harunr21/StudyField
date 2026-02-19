@@ -107,7 +107,7 @@ export interface StudySession {
     planned_duration_seconds: number | null;
     focus_score: number | null;
     notes: string;
+    tag: string | null;
     created_at: string;
     updated_at: string;
 }
-

@@ -12,6 +12,7 @@ type ActiveSession = {
     updated_at: string | null;
     source_type: "manual" | "pomodoro" | "youtube" | "pdf" | "notes";
     planned_duration_seconds: number | null;
+    tag: string | null;
 };
 
 const POMODORO_PRESETS = [25, 5];
@@ -29,6 +30,7 @@ export function StudySessionTimer() {
     const [useCustomMinutes, setUseCustomMinutes] = useState(false);
     const [customMinutes, setCustomMinutes] = useState(30);
     const [isManualMode, setIsManualMode] = useState(false);
+    const [sessionTag, setSessionTag] = useState("");
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">(() => {
         if (typeof window === "undefined") return "default";
@@ -90,7 +92,7 @@ export function StudySessionTimer() {
 
         const { data, error } = await supabase
             .from("study_sessions")
-            .select("id,started_at,updated_at,source_type,planned_duration_seconds")
+            .select("id,started_at,updated_at,source_type,planned_duration_seconds,tag")
             .eq("user_id", user.id)
             .is("ended_at", null)
             .order("started_at", { ascending: false })
@@ -171,7 +173,11 @@ export function StudySessionTimer() {
         setNotificationPermission(permission);
     };
 
-    const startSession = async (sourceType: "manual" | "pomodoro", plannedSeconds: number | null) => {
+    const startSession = async (
+        sourceType: "manual" | "pomodoro",
+        plannedSeconds: number | null,
+        tag: string | null
+    ) => {
         if (saving || activeSession) return;
         setSaving(true);
         setStatusMessage(null);
@@ -195,8 +201,9 @@ export function StudySessionTimer() {
                 started_at: startedAt,
                 updated_at: startedAt, // Ilk baslangic update zamani
                 planned_duration_seconds: plannedSeconds,
+                tag,
             })
-            .select("id,started_at,updated_at,source_type,planned_duration_seconds")
+            .select("id,started_at,updated_at,source_type,planned_duration_seconds,tag")
             .single();
 
         if (!error && data) {
@@ -334,8 +341,11 @@ export function StudySessionTimer() {
                             size="sm"
                             disabled={saving}
                             onClick={async () => {
+                                const normalizedTag = sessionTag.trim();
+                                const tagValue = normalizedTag.length > 0 ? normalizedTag.slice(0, 60) : null;
+
                                 if (isManualMode) {
-                                    await startSession("manual", null);
+                                    await startSession("manual", null, tagValue);
                                     return;
                                 }
 
@@ -345,7 +355,7 @@ export function StudySessionTimer() {
                                 const selectedMinutes = useCustomMinutes
                                     ? Math.min(180, Math.max(1, customMinutes))
                                     : presetMinutes;
-                                await startSession("pomodoro", selectedMinutes * 60);
+                                await startSession("pomodoro", selectedMinutes * 60, tagValue);
                             }}
                             className="gap-1.5"
                         >
@@ -354,6 +364,15 @@ export function StudySessionTimer() {
                         </Button>
                     </div>
                 </div>
+                <input
+                    type="text"
+                    value={sessionTag}
+                    onChange={(e) => setSessionTag(e.target.value)}
+                    maxLength={60}
+                    placeholder="Etiket (opsiyonel)"
+                    className="h-9 w-full max-w-[220px] rounded-md border border-input bg-background px-2 text-xs outline-none"
+                    aria-label="Seans etiketi"
+                />
                 {notificationPermission === "unsupported" && (
                     <p className="text-[11px] text-muted-foreground">Tarayici bildirimi desteklemiyor.</p>
                 )}
@@ -369,6 +388,11 @@ export function StudySessionTimer() {
     return (
         <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
+                {activeSession.tag && (
+                    <div className="max-w-[180px] truncate rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-600 font-medium">
+                        {activeSession.tag}
+                    </div>
+                )}
                 <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 font-medium">
                     {activeSession.source_type === "pomodoro" ? "Pomodoro" : "Seans"} {formatClockValue(clampedElapsedSeconds)}
                     {completion !== null && <span className="ml-1">(%{completion})</span>}
@@ -390,4 +414,3 @@ export function StudySessionTimer() {
         </div>
     );
 }
-
