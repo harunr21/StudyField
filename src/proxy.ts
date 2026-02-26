@@ -55,10 +55,10 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(url);
     }
 
-    // If user is logged in and on login page, redirect to dashboard
+    // If user is logged in and on login page, redirect to YouTube workspace
     if (user && request.nextUrl.pathname.startsWith("/login")) {
         const url = request.nextUrl.clone();
-        url.pathname = "/";
+        url.pathname = "/youtube";
         return NextResponse.redirect(url);
     }
 

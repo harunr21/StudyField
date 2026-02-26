@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist } from "@/lib/supabase/types";
-import { formatClockValue, parseDurationToSeconds } from "@/lib/dashboard-stats";
+import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
 import {
     extractPlaylistId,
     fetchPlaylistInfo,

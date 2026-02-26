@@ -9,9 +9,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "StudyField — Kişisel Çalışma Alanı",
+  title: "StudyField YouTube",
   description:
-    "YouTube playlist takibi, odak seanslari ve istatistikler. Calisma akisini tek bir yerde yonet.",
+    "YouTube playlist takibi, izleme ilerlemesi ve zaman damgali notlar.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#7c3aed",
+  themeColor: "#ef4444",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,

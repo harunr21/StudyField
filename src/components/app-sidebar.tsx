@@ -20,41 +20,21 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
     BookOpen,
     Youtube,
-    Settings,
     LogOut,
     ChevronUp,
-    Home,
-    BarChart3,
-    History,
 } from "lucide-react";
 
 const mainNavItems = [
     {
-        title: "Ana Sayfa",
-        url: "/",
-        icon: Home,
-    },
-    {
         title: "YouTube",
         url: "/youtube",
         icon: Youtube,
-    },
-    {
-        title: "Istatistikler",
-        url: "/stats",
-        icon: BarChart3,
-    },
-    {
-        title: "Seans Gecmisi",
-        url: "/sessions",
-        icon: History,
     },
 ];
 
@@ -80,14 +60,14 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                 <SidebarMenu>
                     <SidebarMenuItem>
                         <SidebarMenuButton size="lg" asChild>
-                            <Link href="/">
+                            <Link href="/youtube">
                                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-sm">
                                     <BookOpen className="size-4" />
                                 </div>
                                 <div className="flex flex-col gap-0.5 leading-none">
                                     <span className="font-semibold">StudyField</span>
                                     <span className="text-xs text-muted-foreground">
-                                        Workspace
+                                        YouTube
                                     </span>
                                 </div>
                             </Link>
@@ -105,7 +85,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                 <SidebarMenuItem key={item.title}>
                                     <SidebarMenuButton
                                         asChild
-                                        isActive={pathname === item.url}
+                                        isActive={pathname === item.url || pathname.startsWith(`${item.url}/`)}
                                         tooltip={item.title}
                                     >
                                         <Link href={item.url}>
@@ -118,7 +98,6 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
-
             </SidebarContent>
 
             <SidebarFooter>
@@ -150,13 +129,6 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                 align="end"
                                 sideOffset={4}
                             >
-                                <DropdownMenuItem asChild>
-                                    <Link href="/settings" className="cursor-pointer">
-                                        <Settings className="mr-2 h-4 w-4" />
-                                        Ayarlar
-                                    </Link>
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                     onClick={handleSignOut}
                                     className="cursor-pointer text-destructive focus:text-destructive"

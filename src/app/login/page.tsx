@@ -42,7 +42,7 @@ export default function LoginPage() {
                     password,
                 });
                 if (error) throw error;
-                window.location.href = "/";
+                window.location.href = "/youtube";
             }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : "Bir hata oluştu";
@@ -69,7 +69,7 @@ export default function LoginPage() {
                     <h1 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
                         StudyField
                     </h1>
-                    <p className="text-muted-foreground mt-1">Kişisel Çalışma Alanın</p>
+                    <p className="text-muted-foreground mt-1">YouTube Çalışma Alanın</p>
                 </div>
 
                 <Card className="border-border/50 shadow-xl shadow-black/5 backdrop-blur-sm bg-card/80">
@@ -79,8 +79,8 @@ export default function LoginPage() {
                         </CardTitle>
                         <CardDescription>
                             {isSignUp
-                                ? "Çalışma alanını oluşturmak için kayıt ol"
-                                : "Çalışma alanına erişmek için giriş yap"}
+                                ? "YouTube çalışma alanını oluşturmak için kayıt ol"
+                                : "YouTube çalışma alanına erişmek için giriş yap"}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -168,7 +168,7 @@ export default function LoginPage() {
                 </Card>
 
                 <p className="text-center text-xs text-muted-foreground mt-6">
-                    StudyField — Kişisel Çalışma Alanı
+                    StudyField — YouTube Çalışma Alanı
                 </p>
             </div>
         </div>

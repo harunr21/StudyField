@@ -1,14 +1,12 @@
 "use client";
 
-import { ModeToggle } from "@/components/mode-toggle";
-import { GlobalSearchDialog } from "@/components/search/global-search-dialog";
-import { StudySessionTimer } from "@/components/study-session-timer";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Youtube } from "lucide-react";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -39,7 +37,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     if (!mounted) {
         return (
             <div className="flex h-screen w-full items-center justify-center bg-background">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-violet-500 border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-red-500 border-t-transparent" />
             </div>
         );
     }
@@ -52,10 +50,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/50 px-4 backdrop-blur-sm bg-background/80">
                         <SidebarTrigger className="-ml-1" />
                         <Separator orientation="vertical" className="mr-2 !h-4" />
-                        <div className="ml-auto flex min-w-0 items-center gap-2">
-                            <StudySessionTimer />
-                            <GlobalSearchDialog />
-                            <ModeToggle />
+                        <div className="flex min-w-0 items-center gap-2">
+                            <Youtube className="h-4 w-4 text-red-500" />
+                            <span className="truncate text-sm font-medium">YouTube Workspace</span>
                         </div>
                     </header>
                     <main className="flex-1 overflow-auto">

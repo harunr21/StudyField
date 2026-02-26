@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist, YoutubeVideo } from "@/lib/supabase/types";
 import { fetchPlaylistVideos, fetchPlaylistInfo } from "@/lib/youtube";
-import { formatClockValue, parseDurationToSeconds } from "@/lib/dashboard-stats";
+import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
