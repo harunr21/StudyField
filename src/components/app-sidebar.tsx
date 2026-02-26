@@ -65,7 +65,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                     <BookOpen className="size-4" />
                                 </div>
                                 <div className="flex flex-col gap-0.5 leading-none">
-                                    <span className="font-semibold">StudyField</span>
+                                    <span className="font-semibold">YouTube Workspace</span>
                                     <span className="text-xs text-muted-foreground">
                                         YouTube
                                     </span>

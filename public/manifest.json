@@ -1,6 +1,6 @@
 {
-  "name": "StudyField",
-  "short_name": "StudyField",
+  "name": "YouTube Workspace",
+  "short_name": "YouTube Workspace",
   "description": "Kişisel Çalışma Alanı — YouTube, seanslar ve istatistikler",
   "start_url": "/",
   "display": "standalone",

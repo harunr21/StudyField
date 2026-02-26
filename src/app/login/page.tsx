@@ -67,7 +67,7 @@ export default function LoginPage() {
                         <BookOpen className="w-8 h-8 text-white" />
                     </div>
                     <h1 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                        StudyField
+                        YouTube Workspace
                     </h1>
                     <p className="text-muted-foreground mt-1">YouTube Çalışma Alanın</p>
                 </div>
@@ -168,7 +168,7 @@ export default function LoginPage() {
                 </Card>
 
                 <p className="text-center text-xs text-muted-foreground mt-6">
-                    StudyField — YouTube Çalışma Alanı
+                    YouTube Workspace — YouTube Çalışma Alanı
                 </p>
             </div>
         </div>

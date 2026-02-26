@@ -9,14 +9,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "StudyField YouTube",
+  title: "YouTube Workspace",
   description:
     "YouTube playlist takibi, izleme ilerlemesi ve zaman damgali notlar.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "StudyField",
+    title: "YouTube Workspace",
   },
   icons: {
     icon: "/icon.svg",
