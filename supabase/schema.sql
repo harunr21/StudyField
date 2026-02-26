@@ -8,52 +8,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- =============================================
--- PAGES TABLE
--- Stores the hierarchy of notes/pages
--- =============================================
-CREATE TABLE IF NOT EXISTS pages (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL DEFAULT 'Başlıksız',
-  icon TEXT DEFAULT '📄',
-  parent_id UUID REFERENCES pages(id) ON DELETE SET NULL,
-  content JSONB DEFAULT '{}',
-  is_archived BOOLEAN DEFAULT false,
-  is_favorite BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Index for faster queries
-CREATE INDEX IF NOT EXISTS idx_pages_user_id ON pages(user_id);
-CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id);
-CREATE INDEX IF NOT EXISTS idx_pages_updated_at ON pages(updated_at DESC);
-
--- =============================================
--- ROW LEVEL SECURITY (RLS)
--- Only the owner can access their own pages
--- =============================================
-ALTER TABLE pages ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own pages"
-  ON pages FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can create own pages"
-  ON pages FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own pages"
-  ON pages FOR UPDATE
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own pages"
-  ON pages FOR DELETE
-  USING (auth.uid() = user_id);
-
--- =============================================
--- UPDATED_AT TRIGGER
--- Automatically update updated_at on changes
+-- SHARED UPDATED_AT TRIGGER FUNCTION
 -- =============================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -62,17 +17,6 @@ BEGIN
   RETURN NEW;
 END;
 $$ language 'plpgsql';
-
-CREATE TRIGGER update_pages_updated_at
-  BEFORE UPDATE ON pages
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
--- =============================================
--- REALTIME
--- Enable realtime for pages table
--- =============================================
-ALTER PUBLICATION supabase_realtime ADD TABLE pages;
 
 -- =============================================
 -- YOUTUBE PLAYLISTS TABLE
@@ -213,101 +157,6 @@ ALTER PUBLICATION supabase_realtime ADD TABLE youtube_playlists;
 ALTER PUBLICATION supabase_realtime ADD TABLE youtube_videos;
 ALTER PUBLICATION supabase_realtime ADD TABLE youtube_video_notes;
 
--- =============================================
--- PDF DOCUMENTS TABLE
--- Stores uploaded PDF documents
--- =============================================
-CREATE TABLE IF NOT EXISTS pdf_documents (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  file_name TEXT NOT NULL,
-  file_url TEXT NOT NULL,
-  file_size BIGINT DEFAULT 0,
-  page_count INTEGER DEFAULT 0,
-  is_favorite BOOLEAN DEFAULT false,
-  is_archived BOOLEAN DEFAULT false,
-  last_page INTEGER DEFAULT 1,
-  tags TEXT[] DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_pdf_documents_user_id ON pdf_documents(user_id);
-CREATE INDEX IF NOT EXISTS idx_pdf_documents_updated_at ON pdf_documents(updated_at DESC);
-
--- RLS for pdf_documents
-ALTER TABLE pdf_documents ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own pdf documents"
-  ON pdf_documents FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can create own pdf documents"
-  ON pdf_documents FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own pdf documents"
-  ON pdf_documents FOR UPDATE
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own pdf documents"
-  ON pdf_documents FOR DELETE
-  USING (auth.uid() = user_id);
-
-CREATE TRIGGER update_pdf_documents_updated_at
-  BEFORE UPDATE ON pdf_documents
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
--- =============================================
--- PDF NOTES TABLE
--- Stores page-based notes for PDF documents
--- =============================================
-CREATE TABLE IF NOT EXISTS pdf_notes (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  pdf_ref_id UUID NOT NULL REFERENCES pdf_documents(id) ON DELETE CASCADE,
-  page_number INTEGER DEFAULT 1,
-  content TEXT NOT NULL DEFAULT '',
-  color TEXT DEFAULT 'blue',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_pdf_notes_pdf ON pdf_notes(pdf_ref_id);
-CREATE INDEX IF NOT EXISTS idx_pdf_notes_user ON pdf_notes(user_id);
-CREATE INDEX IF NOT EXISTS idx_pdf_notes_page ON pdf_notes(pdf_ref_id, page_number);
-
--- RLS for pdf_notes
-ALTER TABLE pdf_notes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own pdf notes"
-  ON pdf_notes FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can create own pdf notes"
-  ON pdf_notes FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own pdf notes"
-  ON pdf_notes FOR UPDATE
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own pdf notes"
-  ON pdf_notes FOR DELETE
-  USING (auth.uid() = user_id);
-
-CREATE TRIGGER update_pdf_notes_updated_at
-  BEFORE UPDATE ON pdf_notes
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
--- Enable realtime for PDF tables
-ALTER PUBLICATION supabase_realtime ADD TABLE pdf_documents;
-ALTER PUBLICATION supabase_realtime ADD TABLE pdf_notes;
-
--- =============================================
 -- USER SETTINGS TABLE
 -- Stores per-user preferences
 -- =============================================
@@ -315,11 +164,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   theme TEXT NOT NULL DEFAULT 'system',
   language TEXT NOT NULL DEFAULT 'tr',
-  default_note_icon TEXT NOT NULL DEFAULT '📝',
   week_starts_on SMALLINT NOT NULL DEFAULT 1,
   daily_goal_minutes INTEGER NOT NULL DEFAULT 120,
-  gemini_api_key TEXT,
-  gemini_model TEXT NOT NULL DEFAULT 'gemini-3-flash',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CHECK (theme IN ('light', 'dark', 'system')),

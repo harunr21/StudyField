@@ -78,7 +78,11 @@ export default function SettingsPage() {
     }, [setTheme, supabase]);
 
     useEffect(() => {
-        loadSettings();
+        const timeoutId = window.setTimeout(() => {
+            void loadSettings();
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
     }, [loadSettings]);
 
     const saveSettings = async () => {

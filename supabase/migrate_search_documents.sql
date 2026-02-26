@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS search_documents (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT search_documents_source_type_check CHECK (
-    source_type IN ('page', 'youtube_video', 'youtube_note', 'pdf_document', 'pdf_note')
+    source_type IN ('youtube_video', 'youtube_note')
   ),
   CONSTRAINT search_documents_unique_source UNIQUE (user_id, source_type, source_id)
 );
@@ -77,13 +77,6 @@ BEGIN
   END IF;
 
   INSERT INTO search_documents (user_id, source_type, source_id, title, body)
-  SELECT p.user_id, 'page', p.id, COALESCE(p.title, ''), COALESCE(p.content::text, '')
-  FROM pages p
-  WHERE target_user_id IS NULL OR p.user_id = target_user_id;
-  GET DIAGNOSTICS affected_count = ROW_COUNT;
-  inserted_count := inserted_count + affected_count;
-
-  INSERT INTO search_documents (user_id, source_type, source_id, title, body)
   SELECT y.user_id, 'youtube_video', y.id, COALESCE(y.title, ''), ''
   FROM youtube_videos y
   WHERE target_user_id IS NULL OR y.user_id = target_user_id;
@@ -97,19 +90,6 @@ BEGIN
   GET DIAGNOSTICS affected_count = ROW_COUNT;
   inserted_count := inserted_count + affected_count;
 
-  INSERT INTO search_documents (user_id, source_type, source_id, title, body)
-  SELECT d.user_id, 'pdf_document', d.id, COALESCE(d.title, ''), ''
-  FROM pdf_documents d
-  WHERE target_user_id IS NULL OR d.user_id = target_user_id;
-  GET DIAGNOSTICS affected_count = ROW_COUNT;
-  inserted_count := inserted_count + affected_count;
-
-  INSERT INTO search_documents (user_id, source_type, source_id, title, body)
-  SELECT n.user_id, 'pdf_note', n.id, '', COALESCE(n.content, '')
-  FROM pdf_notes n
-  WHERE target_user_id IS NULL OR n.user_id = target_user_id;
-  GET DIAGNOSTICS affected_count = ROW_COUNT;
-  inserted_count := inserted_count + affected_count;
   RETURN inserted_count;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

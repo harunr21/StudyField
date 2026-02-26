@@ -116,7 +116,7 @@ export function StudySessionTimer() {
             return;
         }
 
-        let session = data as ActiveSession;
+        const session = data as ActiveSession;
 
         // Stale check
         const recoveredSession = await checkAndRecoverStaleSession(session);

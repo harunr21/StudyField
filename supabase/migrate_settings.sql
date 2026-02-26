@@ -20,11 +20,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   theme TEXT NOT NULL DEFAULT 'system',
   language TEXT NOT NULL DEFAULT 'tr',
-  default_note_icon TEXT NOT NULL DEFAULT '📝',
   week_starts_on SMALLINT NOT NULL DEFAULT 1,
   daily_goal_minutes INTEGER NOT NULL DEFAULT 120,
-  gemini_api_key TEXT,
-  gemini_model TEXT NOT NULL DEFAULT 'gemini-3-flash',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT user_settings_theme_check CHECK (theme IN ('light', 'dark', 'system')),
@@ -32,12 +29,6 @@ CREATE TABLE IF NOT EXISTS user_settings (
   CONSTRAINT user_settings_week_start_check CHECK (week_starts_on IN (0, 1)),
   CONSTRAINT user_settings_daily_goal_check CHECK (daily_goal_minutes BETWEEN 15 AND 1440)
 );
-
-ALTER TABLE user_settings
-  ADD COLUMN IF NOT EXISTS gemini_api_key TEXT;
-
-ALTER TABLE user_settings
-  ADD COLUMN IF NOT EXISTS gemini_model TEXT NOT NULL DEFAULT 'gemini-3-flash';
 
 CREATE INDEX IF NOT EXISTS idx_user_settings_updated_at ON user_settings(updated_at DESC);
 
