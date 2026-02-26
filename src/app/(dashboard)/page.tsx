@@ -2,9 +2,9 @@
 
 import {
     BookOpen,
-    FileText,
     Youtube,
-    FileBox,
+    History,
+    BarChart3,
     ArrowRight,
     Sparkles,
 } from "lucide-react";
@@ -15,14 +15,6 @@ import { formatHourValue, getWeekStart, parseDurationToSeconds } from "@/lib/das
 
 const features = [
     {
-        title: "Notlarım",
-        description: "Notion benzeri blok editör ile notlarını organize et",
-        icon: FileText,
-        href: "/notes",
-        gradient: "from-violet-500 to-purple-600",
-        shadowColor: "shadow-violet-500/20",
-    },
-    {
         title: "YouTube",
         description: "Playlist videolarını takip et ve notlar al",
         icon: Youtube,
@@ -31,28 +23,36 @@ const features = [
         shadowColor: "shadow-red-500/20",
     },
     {
-        title: "PDF Dokümanlar",
-        description: "PDF'lerini yükle, görüntüle ve organize et",
-        icon: FileBox,
-        href: "/pdf",
-        gradient: "from-blue-500 to-cyan-600",
-        shadowColor: "shadow-blue-500/20",
+        title: "Istatistikler",
+        description: "Calisma ritmini ve video ilerlemeni takip et",
+        icon: BarChart3,
+        href: "/stats",
+        gradient: "from-emerald-500 to-cyan-600",
+        shadowColor: "shadow-emerald-500/20",
+    },
+    {
+        title: "Seans Gecmisi",
+        description: "Odak seanslarini incele ve tekrar baslat",
+        icon: History,
+        href: "/sessions",
+        gradient: "from-violet-500 to-indigo-600",
+        shadowColor: "shadow-violet-500/20",
     },
 ];
 
 interface QuickStats {
-    totalNotes: number;
     totalPlaylists: number;
-    totalPdfDocuments: number;
+    totalVideos: number;
     weeklyStudySeconds: number;
+    weeklySessionCount: number;
 }
 
 export default function DashboardPage() {
     const [quickStats, setQuickStats] = useState<QuickStats>({
-        totalNotes: 0,
         totalPlaylists: 0,
-        totalPdfDocuments: 0,
+        totalVideos: 0,
         weeklyStudySeconds: 0,
+        weeklySessionCount: 0,
     });
     const [loadingStats, setLoadingStats] = useState(true);
     const supabase = useMemo(() => createClient(), []);
@@ -64,21 +64,20 @@ export default function DashboardPage() {
             setLoadingStats(true);
             const weekStartIso = getWeekStart().toISOString();
 
-            const [notesResult, playlistsResult, pdfResult, weeklyVideosResult] = await Promise.all([
-                supabase
-                    .from("pages")
-                    .select("id", { count: "exact", head: true })
-                    .eq("is_archived", false),
+            const [playlistsResult, videosResult, weeklyVideosResult, weeklySessionsResult] = await Promise.all([
                 supabase.from("youtube_playlists").select("id", { count: "exact", head: true }),
                 supabase
-                    .from("pdf_documents")
-                    .select("id", { count: "exact", head: true })
-                    .eq("is_archived", false),
+                    .from("youtube_videos")
+                    .select("id", { count: "exact", head: true }),
                 supabase
                     .from("youtube_videos")
                     .select("duration, watched_at")
                     .not("watched_at", "is", null)
                     .gte("watched_at", weekStartIso),
+                supabase
+                    .from("study_sessions")
+                    .select("id", { count: "exact", head: true })
+                    .gte("started_at", weekStartIso),
             ]);
 
             if (cancelled) return;
@@ -90,10 +89,10 @@ export default function DashboardPage() {
             }, 0);
 
             setQuickStats({
-                totalNotes: notesResult.count ?? 0,
                 totalPlaylists: playlistsResult.count ?? 0,
-                totalPdfDocuments: pdfResult.count ?? 0,
+                totalVideos: videosResult.count ?? 0,
                 weeklyStudySeconds,
+                weeklySessionCount: weeklySessionsResult.count ?? 0,
             });
             setLoadingStats(false);
         };
@@ -107,24 +106,24 @@ export default function DashboardPage() {
 
     const stats = [
         {
-            label: "Toplam Not",
-            value: loadingStats ? "..." : quickStats.totalNotes.toLocaleString("tr-TR"),
-            color: "text-violet-500",
-        },
-        {
             label: "YouTube Playlist",
             value: loadingStats ? "..." : quickStats.totalPlaylists.toLocaleString("tr-TR"),
             color: "text-red-500",
         },
         {
-            label: "PDF Doküman",
-            value: loadingStats ? "..." : quickStats.totalPdfDocuments.toLocaleString("tr-TR"),
-            color: "text-blue-500",
+            label: "Toplam Video",
+            value: loadingStats ? "..." : quickStats.totalVideos.toLocaleString("tr-TR"),
+            color: "text-sky-500",
         },
         {
-            label: "Bu Hafta",
+            label: "Haftalik Video",
             value: loadingStats ? "... saat" : `${formatHourValue(quickStats.weeklyStudySeconds)} saat`,
             color: "text-emerald-500",
+        },
+        {
+            label: "Haftalik Seans",
+            value: loadingStats ? "..." : quickStats.weeklySessionCount.toLocaleString("tr-TR"),
+            color: "text-violet-500",
         },
     ];
 
@@ -146,7 +145,7 @@ export default function DashboardPage() {
                     </span>
                 </h1>
                 <p className="text-lg text-muted-foreground max-w-2xl">
-                    Tüm çalışma araçların tek bir yerde. Notlar al, videoları takip et, dokümanlarını organize et.
+                    YouTube calisma akisini, istatistiklerini ve odak seanslarini tek yerden yonet.
                 </p>
             </div>
 

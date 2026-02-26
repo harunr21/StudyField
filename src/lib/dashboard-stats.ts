@@ -1,9 +1,8 @@
 export interface DailyActivityPoint {
     dateKey: string;
     label: string;
-    notes: number;
     videos: number;
-    pdfNotes: number;
+    sessions: number;
     total: number;
 }
 
@@ -94,9 +93,8 @@ export function createLastSevenDays(baseDate = new Date()): DailyActivityPoint[]
         points.push({
             dateKey: toDateKey(date),
             label: date.toLocaleDateString("tr-TR", { weekday: "short" }),
-            notes: 0,
             videos: 0,
-            pdfNotes: 0,
+            sessions: 0,
             total: 0,
         });
     }

@@ -12,14 +12,12 @@ import {
     Circle,
     StickyNote,
     Clock,
-    PlusCircle,
     Trash2,
     ExternalLink,
     ChevronLeft,
     ChevronRight,
     Send,
     Play,
-    Pause,
 } from "lucide-react";
 
 // Format seconds to HH:MM:SS or MM:SS
@@ -111,7 +109,6 @@ export default function VideoWatchPage() {
     const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
     const [editContent, setEditContent] = useState("");
     const [currentTime, setCurrentTime] = useState(0);
-    const [isPlaying, setIsPlaying] = useState(false);
 
     const playerRef = useRef<YTPlayer | null>(null);
     const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -286,8 +283,6 @@ export default function VideoWatchPage() {
                                 if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
                                     try {
                                         setCurrentTime(playerRef.current.getCurrentTime());
-                                        const state = playerRef.current.getPlayerState();
-                                        setIsPlaying(state === 1);
                                     } catch {
                                         // Ignore
                                     }
@@ -296,7 +291,6 @@ export default function VideoWatchPage() {
                         },
                         onStateChange: (event: { data: number }) => {
                             if (isUnmounted) return;
-                            setIsPlaying(event.data === 1);
                             // Mark as watched when video ends
                             if (event.data === 0) {
                                 const v = videoRef.current;
@@ -618,30 +612,28 @@ export default function VideoWatchPage() {
                     </div>
                 </div>
 
-                {/* Notes Sidebar */}
+                {/* Right Sidebar */}
                 {sidebarOpen && (
-                    <div className="w-96 border-l border-border/30 flex flex-col bg-card/20 flex-shrink-0">
-                        {/* Notes Header */}
+                    <div className="w-96 border-l border-border/30 flex flex-col bg-card/20 flex-shrink-0 min-h-0">
                         <div className="p-4 border-b border-border/30">
                             <div className="flex items-center gap-2 mb-1">
                                 <StickyNote className="h-4 w-4 text-amber-500" />
-                                <h3 className="font-semibold text-sm">Zaman Damgalı Notlar</h3>
+                                <h3 className="font-semibold text-sm">Zaman Damgali Notlar</h3>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                Video anlarına bağlı notlar al
+                                Video anlarina bagli notlar al
                             </p>
                         </div>
 
-                        {/* Add Note Input */}
                         <div className="p-4 border-b border-border/30">
                             <div className="flex items-center gap-2 mb-2">
                                 <button
                                     onClick={captureCurrentTime}
                                     className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                                    title="Mevcut zamanı yakala"
+                                    title="Mevcut zamani yakala"
                                 >
                                     <Clock className="h-3 w-3" />
-                                    Zamanı Yakala
+                                    Zamani Yakala
                                 </button>
                                 <input
                                     placeholder="0:00"
@@ -652,7 +644,7 @@ export default function VideoWatchPage() {
                             </div>
                             <div className="flex gap-2">
                                 <textarea
-                                    placeholder="Notunuzu yazın..."
+                                    placeholder="Notunuzu yazin..."
                                     value={noteContent}
                                     onChange={(e) => setNoteContent(e.target.value)}
                                     onKeyDown={(e) => {
@@ -679,98 +671,98 @@ export default function VideoWatchPage() {
                             </div>
                         </div>
 
-                        {/* Notes List */}
                         <div className="flex-1 overflow-y-auto p-2">
-                            {notes.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-                                    <StickyNote className="h-8 w-8 text-muted-foreground/30 mb-3" />
-                                    <p className="text-sm text-muted-foreground mb-1">Henüz not yok</p>
-                                    <p className="text-xs text-muted-foreground/70">
-                                        Video izlerken önemli anları not al
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="space-y-1.5">
-                                    {notes.map((note) => (
-                                        <div
-                                            key={note.id}
-                                            className="group p-3 rounded-xl bg-background/50 border border-border/30 hover:border-border/60 transition-all"
-                                        >
-                                            <div className="flex items-start justify-between gap-2 mb-1.5">
-                                                <button
-                                                    onClick={() => seekTo(note.timestamp_seconds)}
-                                                    className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                                                >
-                                                    <Play className="h-2.5 w-2.5" />
-                                                    {formatTimestamp(note.timestamp_seconds)}
-                                                </button>
-                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingNoteId(note.id);
-                                                            setEditContent(note.content);
-                                                        }}
-                                                        className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                                                        title="Düzenle"
-                                                    >
-                                                        <StickyNote className="h-3 w-3" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => deleteNote(note.id)}
-                                                        className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                                        title="Sil"
-                                                    >
-                                                        <Trash2 className="h-3 w-3" />
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {editingNoteId === note.id ? (
-                                                <div className="space-y-2">
-                                                    <textarea
-                                                        value={editContent}
-                                                        onChange={(e) => setEditContent(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === "Enter" && !e.shiftKey) {
-                                                                e.preventDefault();
-                                                                updateNote(note.id);
-                                                            }
-                                                            if (e.key === "Escape") {
-                                                                setEditingNoteId(null);
-                                                            }
-                                                        }}
-                                                        rows={2}
-                                                        className="w-full text-sm bg-background border border-border/50 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-red-500/50"
-                                                        autoFocus
-                                                    />
-                                                    <div className="flex gap-2 justify-end">
-                                                        <button
-                                                            onClick={() => setEditingNoteId(null)}
-                                                            className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground"
-                                                        >
-                                                            İptal
-                                                        </button>
-                                                        <button
-                                                            onClick={() => updateNote(note.id)}
-                                                            className="text-xs px-2 py-1 bg-red-500/10 text-red-400 rounded-md hover:bg-red-500/20"
-                                                        >
-                                                            Kaydet
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-                                                    {note.content}
-                                                </p>
-                                            )}
+                                    {notes.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+                                            <StickyNote className="h-8 w-8 text-muted-foreground/30 mb-3" />
+                                            <p className="text-sm text-muted-foreground mb-1">Henuz not yok</p>
+                                            <p className="text-xs text-muted-foreground/70">
+                                                Video izlerken onemli anlari not al
+                                            </p>
                                         </div>
-                                    ))}
+                                    ) : (
+                                        <div className="space-y-1.5">
+                                            {notes.map((note) => (
+                                                <div
+                                                    key={note.id}
+                                                    className="group p-3 rounded-xl bg-background/50 border border-border/30 hover:border-border/60 transition-all"
+                                                >
+                                                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                        <button
+                                                            onClick={() => seekTo(note.timestamp_seconds)}
+                                                            className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                                                        >
+                                                            <Play className="h-2.5 w-2.5" />
+                                                            {formatTimestamp(note.timestamp_seconds)}
+                                                        </button>
+                                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditingNoteId(note.id);
+                                                                    setEditContent(note.content);
+                                                                }}
+                                                                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                                                                title="Duzenle"
+                                                            >
+                                                                <StickyNote className="h-3 w-3" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => deleteNote(note.id)}
+                                                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                                                                title="Sil"
+                                                            >
+                                                                <Trash2 className="h-3 w-3" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {editingNoteId === note.id ? (
+                                                        <div className="space-y-2">
+                                                            <textarea
+                                                                value={editContent}
+                                                                onChange={(e) => setEditContent(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter" && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        updateNote(note.id);
+                                                                    }
+                                                                    if (e.key === "Escape") {
+                                                                        setEditingNoteId(null);
+                                                                    }
+                                                                }}
+                                                                rows={2}
+                                                                className="w-full text-sm bg-background border border-border/50 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                                                autoFocus
+                                                            />
+                                                            <div className="flex gap-2 justify-end">
+                                                                <button
+                                                                    onClick={() => setEditingNoteId(null)}
+                                                                    className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground"
+                                                                >
+                                                                    Iptal
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => updateNote(note.id)}
+                                                                    className="text-xs px-2 py-1 bg-red-500/10 text-red-400 rounded-md hover:bg-red-500/20"
+                                                                >
+                                                                    Kaydet
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
+                                                            {note.content}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
                     </div>
                 )}
             </div>
         </div>
     );
 }
+

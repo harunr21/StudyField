@@ -26,14 +26,11 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
     BookOpen,
-    FileText,
     Youtube,
-    FileBox,
     Settings,
     LogOut,
     ChevronUp,
     Home,
-    PlusCircle,
     BarChart3,
     History,
 } from "lucide-react";
@@ -45,19 +42,9 @@ const mainNavItems = [
         icon: Home,
     },
     {
-        title: "Notlarim",
-        url: "/notes",
-        icon: FileText,
-    },
-    {
         title: "YouTube",
         url: "/youtube",
         icon: Youtube,
-    },
-    {
-        title: "PDF Dokumanlar",
-        url: "/pdf",
-        icon: FileBox,
     },
     {
         title: "Istatistikler",
@@ -132,21 +119,6 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                     </SidebarGroupContent>
                 </SidebarGroup>
 
-                <SidebarGroup>
-                    <SidebarGroupLabel>Hizli Eylemler</SidebarGroupLabel>
-                    <SidebarGroupContent>
-                        <SidebarMenu>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild tooltip="Yeni Not">
-                                    <Link href="/notes/new">
-                                        <PlusCircle />
-                                        <span>Yeni Not</span>
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                        </SidebarMenu>
-                    </SidebarGroupContent>
-                </SidebarGroup>
             </SidebarContent>
 
             <SidebarFooter>

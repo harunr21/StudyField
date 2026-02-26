@@ -11,7 +11,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "StudyField — Kişisel Çalışma Alanı",
   description:
-    "Notlar, YouTube playlists, PDF dökümanlar ve daha fazlası. Tüm çalışma araçların tek bir yerde.",
+    "YouTube playlist takibi, odak seanslari ve istatistikler. Calisma akisini tek bir yerde yonet.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

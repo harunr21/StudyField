@@ -11,13 +11,12 @@ import { Loader2, Save, RotateCcw, AlertCircle } from "lucide-react";
 
 type EditableSettings = Pick<
     UserSettings,
-    "theme" | "language" | "default_note_icon" | "week_starts_on" | "daily_goal_minutes"
+    "theme" | "language" | "week_starts_on" | "daily_goal_minutes"
 >;
 
 const DEFAULT_SETTINGS: EditableSettings = {
     theme: "system",
     language: "tr",
-    default_note_icon: "??",
     week_starts_on: 1,
     daily_goal_minutes: 120,
 };
@@ -69,7 +68,6 @@ export default function SettingsPage() {
         const safeSettings: EditableSettings = {
             theme: data.theme ?? DEFAULT_SETTINGS.theme,
             language: data.language ?? DEFAULT_SETTINGS.language,
-            default_note_icon: data.default_note_icon ?? DEFAULT_SETTINGS.default_note_icon,
             week_starts_on: data.week_starts_on ?? DEFAULT_SETTINGS.week_starts_on,
             daily_goal_minutes: data.daily_goal_minutes ?? DEFAULT_SETTINGS.daily_goal_minutes,
         };
@@ -80,7 +78,6 @@ export default function SettingsPage() {
     }, [setTheme, supabase]);
 
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         loadSettings();
     }, [loadSettings]);
 
@@ -102,7 +99,6 @@ export default function SettingsPage() {
 
         const payload: EditableSettings = {
             ...settings,
-            default_note_icon: settings.default_note_icon.trim() || DEFAULT_SETTINGS.default_note_icon,
             daily_goal_minutes: Math.min(1440, Math.max(15, settings.daily_goal_minutes)),
         };
 
@@ -186,22 +182,6 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="space-y-2">
-                        <Label htmlFor="default-note-icon">Varsayilan Not Ikonu</Label>
-                        <Input
-                            id="default-note-icon"
-                            maxLength={6}
-                            value={settings.default_note_icon}
-                            onChange={(e) =>
-                                setSettings((prev) => ({
-                                    ...prev,
-                                    default_note_icon: e.target.value,
-                                }))
-                            }
-                            placeholder="??"
-                        />
-                    </div>
-
-                    <div className="space-y-2">
                         <Label htmlFor="week-starts-on">Hafta Baslangici</Label>
                         <select
                             id="week-starts-on"
@@ -219,7 +199,7 @@ export default function SettingsPage() {
                         </select>
                     </div>
 
-                    <div className="space-y-2 md:col-span-2">
+                    <div className="space-y-2">
                         <Label htmlFor="daily-goal">Gunluk Hedef (dakika)</Label>
                         <Input
                             id="daily-goal"

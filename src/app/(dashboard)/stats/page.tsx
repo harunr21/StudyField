@@ -7,8 +7,7 @@ import {
     BookOpenText,
     CheckCircle2,
     Clock3,
-    FileBox,
-    FileText,
+    Timer,
     Youtube,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -22,49 +21,30 @@ import {
 } from "@/lib/dashboard-stats";
 
 interface StatsSnapshot {
-    totalNotes: number;
-    archivedNotes: number;
     totalPlaylists: number;
     totalVideos: number;
     watchedVideos: number;
-    totalPdfDocuments: number;
-    archivedPdfDocuments: number;
-    totalPdfNotes: number;
     weeklyStudySeconds: number;
     weeklySessionSeconds: number;
     weeklySessionCount: number;
     todaySessionSeconds: number;
     dailyGoalMinutes: number;
     weeklyWatchedVideos: number;
-    weeklyUpdatedNotes: number;
-    weeklyPdfNotes: number;
     activity: DailyActivityPoint[];
 }
 
 const initialStats: StatsSnapshot = {
-    totalNotes: 0,
-    archivedNotes: 0,
     totalPlaylists: 0,
     totalVideos: 0,
     watchedVideos: 0,
-    totalPdfDocuments: 0,
-    archivedPdfDocuments: 0,
-    totalPdfNotes: 0,
     weeklyStudySeconds: 0,
     weeklySessionSeconds: 0,
     weeklySessionCount: 0,
     todaySessionSeconds: 0,
     dailyGoalMinutes: 120,
     weeklyWatchedVideos: 0,
-    weeklyUpdatedNotes: 0,
-    weeklyPdfNotes: 0,
     activity: createLastSevenDays(),
 };
-
-interface DateOnlyRow {
-    updated_at?: string;
-    created_at?: string;
-}
 
 interface RecentVideoRow {
     duration: string;
@@ -105,32 +85,13 @@ export default function StatsPage() {
             const todayStartTime = todayStart.getTime();
 
             const [
-                notesActiveResult,
-                notesArchivedResult,
-                notesRecentResult,
                 playlistsResult,
                 videosTotalResult,
                 videosWatchedResult,
                 videosRecentResult,
-                pdfActiveResult,
-                pdfArchivedResult,
-                pdfNotesTotalResult,
-                pdfNotesRecentResult,
                 studySessionsRecentResult,
                 userSettingsResult,
             ] = await Promise.all([
-                supabase
-                    .from("pages")
-                    .select("id", { count: "exact", head: true })
-                    .eq("is_archived", false),
-                supabase
-                    .from("pages")
-                    .select("id", { count: "exact", head: true })
-                    .eq("is_archived", true),
-                supabase
-                    .from("pages")
-                    .select("updated_at")
-                    .gte("updated_at", sevenDaysStartIso),
                 supabase.from("youtube_playlists").select("id", { count: "exact", head: true }),
                 supabase.from("youtube_videos").select("id", { count: "exact", head: true }),
                 supabase
@@ -142,19 +103,6 @@ export default function StatsPage() {
                     .select("duration, watched_at")
                     .not("watched_at", "is", null)
                     .gte("watched_at", sevenDaysStartIso),
-                supabase
-                    .from("pdf_documents")
-                    .select("id", { count: "exact", head: true })
-                    .eq("is_archived", false),
-                supabase
-                    .from("pdf_documents")
-                    .select("id", { count: "exact", head: true })
-                    .eq("is_archived", true),
-                supabase.from("pdf_notes").select("id", { count: "exact", head: true }),
-                supabase
-                    .from("pdf_notes")
-                    .select("created_at")
-                    .gte("created_at", sevenDaysStartIso),
                 supabase
                     .from("study_sessions")
                     .select("started_at,ended_at,duration_seconds")
@@ -169,26 +117,6 @@ export default function StatsPage() {
 
             const activity = createLastSevenDays();
             const activityMap = new Map(activity.map((point) => [point.dateKey, point]));
-
-            let weeklyUpdatedNotes = 0;
-            const notesRecent = (notesRecentResult.data as DateOnlyRow[]) ?? [];
-            for (const note of notesRecent) {
-                if (!note.updated_at) continue;
-
-                const noteDate = new Date(note.updated_at);
-                if (Number.isNaN(noteDate.getTime())) continue;
-
-                if (noteDate.getTime() >= weekStartTime) {
-                    weeklyUpdatedNotes++;
-                }
-
-                const dayKey = dateKey(note.updated_at);
-                const point = activityMap.get(dayKey);
-                if (!point) continue;
-
-                point.notes += 1;
-                point.total += 1;
-            }
 
             let weeklyWatchedVideos = 0;
             let weeklyStudySeconds = 0;
@@ -207,28 +135,7 @@ export default function StatsPage() {
                 const dayKey = dateKey(video.watched_at);
                 const point = activityMap.get(dayKey);
                 if (!point) continue;
-
                 point.videos += 1;
-                point.total += 1;
-            }
-
-            let weeklyPdfNotes = 0;
-            const pdfNotesRecent = (pdfNotesRecentResult.data as DateOnlyRow[]) ?? [];
-            for (const pdfNote of pdfNotesRecent) {
-                if (!pdfNote.created_at) continue;
-
-                const noteDate = new Date(pdfNote.created_at);
-                if (Number.isNaN(noteDate.getTime())) continue;
-
-                if (noteDate.getTime() >= weekStartTime) {
-                    weeklyPdfNotes++;
-                }
-
-                const dayKey = dateKey(pdfNote.created_at);
-                const point = activityMap.get(dayKey);
-                if (!point) continue;
-
-                point.pdfNotes += 1;
                 point.total += 1;
             }
 
@@ -254,28 +161,26 @@ export default function StatsPage() {
                 if (startedAtMs >= todayStartTime) {
                     todaySessionSeconds += durationSeconds;
                 }
+
+                const point = activityMap.get(dateKey(session.started_at));
+                if (!point) continue;
+                point.sessions += 1;
+                point.total += 1;
             }
 
             const userSettings = userSettingsResult.data as UserSettingsRow | null;
             const dailyGoalMinutes = userSettings?.daily_goal_minutes ?? 120;
 
             setStats({
-                totalNotes: notesActiveResult.count ?? 0,
-                archivedNotes: notesArchivedResult.count ?? 0,
                 totalPlaylists: playlistsResult.count ?? 0,
                 totalVideos: videosTotalResult.count ?? 0,
                 watchedVideos: videosWatchedResult.count ?? 0,
-                totalPdfDocuments: pdfActiveResult.count ?? 0,
-                archivedPdfDocuments: pdfArchivedResult.count ?? 0,
-                totalPdfNotes: pdfNotesTotalResult.count ?? 0,
                 weeklyStudySeconds,
                 weeklySessionSeconds,
                 weeklySessionCount,
                 todaySessionSeconds,
                 dailyGoalMinutes,
                 weeklyWatchedVideos,
-                weeklyUpdatedNotes,
-                weeklyPdfNotes,
                 activity,
             });
 
@@ -301,7 +206,7 @@ export default function StatsPage() {
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
             <h1 className="text-3xl font-bold tracking-tight mb-2">Istatistikler</h1>
             <p className="text-muted-foreground mb-8">
-                Calisma aliskanliklarini ve ilerleme durumunu izle.
+                YouTube ilerlemeni ve odak seanslarini izle.
             </p>
 
             {loading ? (
@@ -316,22 +221,22 @@ export default function StatsPage() {
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                     <StatCard
-                        icon={<FileText className="h-4 w-4 text-violet-400" />}
-                        label="Toplam Not"
-                        value={stats.totalNotes.toLocaleString("tr-TR")}
-                        subValue={`${stats.archivedNotes.toLocaleString("tr-TR")} arsiv`}
-                    />
-                    <StatCard
                         icon={<Youtube className="h-4 w-4 text-red-400" />}
                         label="Playlist"
                         value={stats.totalPlaylists.toLocaleString("tr-TR")}
                         subValue={`${stats.totalVideos.toLocaleString("tr-TR")} video`}
                     />
                     <StatCard
-                        icon={<FileBox className="h-4 w-4 text-blue-400" />}
-                        label="PDF Dokuman"
-                        value={stats.totalPdfDocuments.toLocaleString("tr-TR")}
-                        subValue={`${stats.archivedPdfDocuments.toLocaleString("tr-TR")} arsiv`}
+                        icon={<CheckCircle2 className="h-4 w-4 text-sky-400" />}
+                        label="Izlenen Video"
+                        value={stats.watchedVideos.toLocaleString("tr-TR")}
+                        subValue={`%${videoCompletionRate} tamamlama`}
+                    />
+                    <StatCard
+                        icon={<Timer className="h-4 w-4 text-red-300" />}
+                        label="Video (Haftalik)"
+                        value={`${formatHourValue(stats.weeklyStudySeconds)} saat`}
+                        subValue={`${stats.weeklyWatchedVideos.toLocaleString("tr-TR")} video`}
                     />
                     <StatCard
                         icon={<Clock3 className="h-4 w-4 text-emerald-400" />}
@@ -353,16 +258,14 @@ export default function StatsPage() {
                         {stats.activity.map((day) => {
                             const totalHeight = Math.max(10, Math.round((day.total / maxDailyTotal) * 120));
                             const videoHeight = day.total > 0 ? Math.max(2, Math.round((day.videos / day.total) * totalHeight)) : 0;
-                            const noteHeight = day.total > 0 ? Math.max(2, Math.round((day.notes / day.total) * totalHeight)) : 0;
-                            const pdfHeight = Math.max(totalHeight - videoHeight - noteHeight, 0);
+                            const sessionHeight = Math.max(totalHeight - videoHeight, 0);
 
                             return (
                                 <div key={day.dateKey} className="flex flex-col items-center gap-2">
                                     <div className="h-32 w-full rounded-lg bg-background/40 border border-border/40 flex items-end justify-center p-1">
                                         {day.total > 0 ? (
                                             <div className="w-full max-w-8 rounded-md overflow-hidden flex flex-col-reverse">
-                                                <div className="bg-blue-500/70" style={{ height: `${pdfHeight}px` }} />
-                                                <div className="bg-violet-500/80" style={{ height: `${noteHeight}px` }} />
+                                                <div className="bg-emerald-500/75" style={{ height: `${sessionHeight}px` }} />
                                                 <div className="bg-red-500/80" style={{ height: `${videoHeight}px` }} />
                                             </div>
                                         ) : (
@@ -380,16 +283,12 @@ export default function StatsPage() {
 
                     <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
-                            Not guncellemeleri
-                        </span>
-                        <span className="inline-flex items-center gap-1.5">
                             <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
                             Izlenen videolar
                         </span>
                         <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                            PDF notlari
+                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                            Odak seanslari
                         </span>
                     </div>
                 </div>
@@ -429,19 +328,9 @@ export default function StatsPage() {
                                 </div>
                             </div>
                             <ProgressLine
-                                label="Bu hafta not guncellemesi"
-                                value={stats.weeklyUpdatedNotes}
-                                accent="text-violet-400"
-                            />
-                            <ProgressLine
                                 label="Bu hafta odak seansi"
                                 value={stats.weeklySessionCount}
                                 accent="text-emerald-400"
-                            />
-                            <ProgressLine
-                                label="Bu hafta PDF notu"
-                                value={stats.weeklyPdfNotes}
-                                accent="text-blue-400"
                             />
                             <ProgressLine
                                 label="Bu hafta izlenen video"
@@ -462,9 +351,9 @@ export default function StatsPage() {
                             <h3 className="font-semibold">Hizli Erisim</h3>
                         </div>
                         <div className="space-y-2">
-                            <QuickLink href="/notes" label="Notlari ac" />
                             <QuickLink href="/youtube" label="YouTube playlistleri" />
-                            <QuickLink href="/pdf" label="PDF kutuphanesi" />
+                            <QuickLink href="/sessions" label="Seans gecmisi" />
+                            <QuickLink href="/settings" label="Ayarlar" />
                         </div>
                     </div>
                 </div>

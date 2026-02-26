@@ -1,7 +1,7 @@
 {
   "name": "StudyField",
   "short_name": "StudyField",
-  "description": "Kişisel Çalışma Alanı — Notlar, YouTube, PDF ve daha fazlası",
+  "description": "Kişisel Çalışma Alanı — YouTube, seanslar ve istatistikler",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, FileText, Youtube, FileBox, StickyNote, Loader2 } from "lucide-react";
+import { Search, Youtube, StickyNote, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { searchWorkspace, type GlobalSearchItem } from "@/lib/global-search";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -10,17 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 function itemIcon(kind: GlobalSearchItem["kind"]) {
-    if (kind === "page") return <FileText className="h-4 w-4 text-violet-400" />;
     if (kind === "youtube_video") return <Youtube className="h-4 w-4 text-red-400" />;
-    if (kind === "youtube_note") return <StickyNote className="h-4 w-4 text-amber-400" />;
-    if (kind === "pdf_document") return <FileBox className="h-4 w-4 text-blue-400" />;
-    return <StickyNote className="h-4 w-4 text-blue-400" />;
-}
-
-function groupLabel(kind: GlobalSearchItem["kind"]) {
-    if (kind === "page") return "Not";
-    if (kind === "youtube_video" || kind === "youtube_note") return "YouTube";
-    return "PDF";
+    return <StickyNote className="h-4 w-4 text-amber-400" />;
 }
 
 export function GlobalSearchDialog() {
@@ -34,21 +25,6 @@ export function GlobalSearchDialog() {
     const [items, setItems] = useState<GlobalSearchItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    const groupedItems = useMemo(() => {
-        const order = ["Not", "YouTube", "PDF"] as const;
-        const groups = new Map<(typeof order)[number], GlobalSearchItem[]>();
-
-        for (const key of order) groups.set(key, []);
-        for (const item of items) {
-            const key = groupLabel(item.kind) as (typeof order)[number];
-            groups.get(key)?.push(item);
-        }
-
-        return order
-            .map((key) => ({ label: key, items: groups.get(key) ?? [] }))
-            .filter((group) => group.items.length > 0);
-    }, [items]);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -136,7 +112,7 @@ export function GlobalSearchDialog() {
                                 ref={inputRef}
                                 value={query}
                                 onChange={(e) => runSearch(e.target.value)}
-                                placeholder="Not, video, PDF veya not icerigi ara..."
+                                placeholder="Video veya video notu ara..."
                                 className="pl-10 h-11 border-border/50"
                             />
                         </div>
@@ -164,28 +140,26 @@ export function GlobalSearchDialog() {
                             <div className="px-3 py-3 text-sm text-muted-foreground">Sonuc bulunamadi.</div>
                         )}
 
-                        {!loading &&
-                            !error &&
-                            groupedItems.map((group) => (
-                                <div key={group.label} className="mb-2 last:mb-0">
-                                    <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                        {group.label}
-                                    </div>
-                                    {group.items.map((item) => (
-                                        <button
-                                            key={`${item.kind}:${item.id}`}
-                                            onClick={() => openItem(item.href)}
-                                            className="w-full text-left rounded-lg px-3 py-2.5 hover:bg-accent transition-colors flex items-start gap-3"
-                                        >
-                                            <span className="mt-0.5">{itemIcon(item.kind)}</span>
-                                            <span className="min-w-0">
-                                                <span className="block text-sm font-medium truncate">{item.title}</span>
-                                                <span className="block text-xs text-muted-foreground truncate">{item.subtitle}</span>
-                                            </span>
-                                        </button>
-                                    ))}
+                        {!loading && !error && items.length > 0 && (
+                            <div className="mb-2 last:mb-0">
+                                <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    YouTube
                                 </div>
-                            ))}
+                                {items.map((item) => (
+                                    <button
+                                        key={`${item.kind}:${item.id}`}
+                                        onClick={() => openItem(item.href)}
+                                        className="w-full text-left rounded-lg px-3 py-2.5 hover:bg-accent transition-colors flex items-start gap-3"
+                                    >
+                                        <span className="mt-0.5">{itemIcon(item.kind)}</span>
+                                        <span className="min-w-0">
+                                            <span className="block text-sm font-medium truncate">{item.title}</span>
+                                            <span className="block text-xs text-muted-foreground truncate">{item.subtitle}</span>
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </DialogContent>
             </Dialog>
