@@ -318,6 +318,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
   default_note_icon TEXT NOT NULL DEFAULT '📝',
   week_starts_on SMALLINT NOT NULL DEFAULT 1,
   daily_goal_minutes INTEGER NOT NULL DEFAULT 120,
+  gemini_api_key TEXT,
+  gemini_model TEXT NOT NULL DEFAULT 'gemini-3-flash',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CHECK (theme IN ('light', 'dark', 'system')),

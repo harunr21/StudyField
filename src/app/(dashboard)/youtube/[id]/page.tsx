@@ -339,6 +339,14 @@ export default function PlaylistDetailPage() {
         () => videos.reduce((total, video) => total + parseDurationToSeconds(video.duration ?? ""), 0),
         [videos]
     );
+    const unwatchedDurationSeconds = useMemo(
+        () =>
+            videos.reduce(
+                (total, video) => total + (video.is_watched ? 0 : parseDurationToSeconds(video.duration ?? "")),
+                0
+            ),
+        [videos]
+    );
     const titleListText = useMemo(() => videos.map((video) => video.title).join("\n"), [videos]);
 
     const copyTitles = useCallback(async () => {
@@ -422,7 +430,7 @@ export default function PlaylistDetailPage() {
                         )}
 
                         {/* Stats */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
                             <div className="bg-card/50 rounded-xl p-3 border border-border/50 text-center">
                                 <p className="text-xl font-bold text-red-400">{videos.length}</p>
                                 <p className="text-xs text-muted-foreground">Video</p>
@@ -440,6 +448,10 @@ export default function PlaylistDetailPage() {
                             <div className="bg-card/50 rounded-xl p-3 border border-border/50 text-center">
                                 <p className="text-xl font-bold text-sky-400">{formatClockValue(totalDurationSeconds)}</p>
                                 <p className="text-xs text-muted-foreground">Süre</p>
+                            </div>
+                            <div className="bg-card/50 rounded-xl p-3 border border-border/50 text-center">
+                                <p className="text-xl font-bold text-violet-400">{formatClockValue(unwatchedDurationSeconds)}</p>
+                                <p className="text-xs text-muted-foreground">Kalan Süre</p>
                             </div>
                         </div>
 

@@ -91,6 +91,8 @@ export interface UserSettings {
     default_note_icon: string;
     week_starts_on: 0 | 1;
     daily_goal_minutes: number;
+    gemini_api_key: string | null;
+    gemini_model: string;
     created_at: string;
     updated_at: string;
 }
