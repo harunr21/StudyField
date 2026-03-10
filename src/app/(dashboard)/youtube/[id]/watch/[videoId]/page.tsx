@@ -100,6 +100,7 @@ export default function VideoWatchPage() {
     const supabase = useMemo(() => createClient(), []);
 
     const [video, setVideo] = useState<YoutubeVideo | null>(null);
+    const [playlistVideos, setPlaylistVideos] = useState<YoutubeVideo[]>([]);
     const [notes, setNotes] = useState<YoutubeVideoNote[]>([]);
     const [initialLoading, setInitialLoading] = useState(true);
     const [noteContent, setNoteContent] = useState("");
@@ -167,6 +168,17 @@ export default function VideoWatchPage() {
 
             setVideo(vidData as YoutubeVideo);
 
+            // Fetch playlist videos for previous/next navigation
+            const { data: playlistVideoData } = await supabase
+                .from("youtube_videos")
+                .select("*")
+                .eq("playlist_ref_id", playlistId)
+                .order("position", { ascending: true });
+
+            if (!cancelled && playlistVideoData) {
+                setPlaylistVideos(playlistVideoData as YoutubeVideo[]);
+            }
+
             // Fetch notes
             const { data: notesData } = await supabase
                 .from("youtube_video_notes")
@@ -199,6 +211,24 @@ export default function VideoWatchPage() {
             cancelled = true;
         };
     }, [videoDbId, playlistId, router, supabase]);
+
+    const currentVideoIndex = useMemo(
+        () => playlistVideos.findIndex((playlistVideo) => playlistVideo.id === videoDbId),
+        [playlistVideos, videoDbId]
+    );
+
+    const previousVideo = currentVideoIndex > 0 ? playlistVideos[currentVideoIndex - 1] : null;
+    const nextVideo =
+        currentVideoIndex >= 0 && currentVideoIndex < playlistVideos.length - 1
+            ? playlistVideos[currentVideoIndex + 1]
+            : null;
+
+    const navigateToPlaylistVideo = useCallback(
+        (targetVideoId: string) => {
+            router.push(`/youtube/${playlistId}/watch/${targetVideoId}`);
+        },
+        [playlistId, router]
+    );
 
     // Initialize YouTube IFrame API
     useEffect(() => {
@@ -546,6 +576,28 @@ export default function VideoWatchPage() {
                     <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => previousVideo && navigateToPlaylistVideo(previousVideo.id)}
+                        disabled={!previousVideo}
+                        className="gap-1.5 text-xs"
+                        title={previousVideo ? `Önceki video: ${previousVideo.title}` : "Önceki video yok"}
+                    >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                        Önceki
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => nextVideo && navigateToPlaylistVideo(nextVideo.id)}
+                        disabled={!nextVideo}
+                        className="gap-1.5 text-xs"
+                        title={nextVideo ? `Sonraki video: ${nextVideo.title}` : "Sonraki video yok"}
+                    >
+                        Sonraki
+                        <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={toggleWatched}
                         className={`gap-1.5 text-xs ${video.is_watched ? "text-emerald-500" : "text-muted-foreground"}`}
                     >
@@ -602,6 +654,12 @@ export default function VideoWatchPage() {
                                 )}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span className="hidden md:inline">
+                                    {currentVideoIndex >= 0
+                                        ? `${currentVideoIndex + 1}/${playlistVideos.length}`
+                                        : `0/${playlistVideos.length}`}
+                                </span>
+                                <span className="hidden md:inline mx-1">|</span>
                                 <Clock className="h-3.5 w-3.5" />
                                 <span>{formatTimestamp(Math.floor(currentTime))}</span>
                                 <span className="mx-1">|</span>
