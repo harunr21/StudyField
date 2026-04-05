@@ -28,6 +28,7 @@ import {
     Youtube,
     LogOut,
     ChevronUp,
+    PenTool,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -35,6 +36,11 @@ const mainNavItems = [
         title: "YouTube",
         url: "/youtube",
         icon: Youtube,
+    },
+    {
+        title: "Çizim Tahtası",
+        url: "/whiteboard",
+        icon: PenTool,
     },
 ];
 

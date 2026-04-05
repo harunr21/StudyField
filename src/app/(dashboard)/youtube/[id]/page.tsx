@@ -8,6 +8,7 @@ import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import {
     Dialog,
     DialogContent,
@@ -32,6 +33,9 @@ import {
     MoreHorizontal,
     RefreshCw,
     Copy,
+    Scissors,
+    Sparkles,
+    AlertCircle,
 } from "lucide-react";
 import {
     DropdownMenu,
@@ -56,6 +60,14 @@ export default function PlaylistDetailPage() {
     const [syncMessage, setSyncMessage] = useState("");
     const [titleDialogOpen, setTitleDialogOpen] = useState(false);
     const [copyState, setCopyState] = useState<"idle" | "success" | "error">("idle");
+
+    // Sub-playlist creation state
+    const [subPlaylistDialogOpen, setSubPlaylistDialogOpen] = useState(false);
+    const [subPlaylistRange, setSubPlaylistRange] = useState<[number, number]>([1, 1]);
+    const [subPlaylistName, setSubPlaylistName] = useState("");
+    const [creatingSubPlaylist, setCreatingSubPlaylist] = useState(false);
+    const [subPlaylistError, setSubPlaylistError] = useState("");
+    const [subPlaylistSuccess, setSubPlaylistSuccess] = useState("");
 
     // Initial data fetch
     useEffect(() => {
@@ -379,6 +391,100 @@ export default function PlaylistDetailPage() {
         }
     }, [titleListText]);
 
+    // Sub-playlist helpers
+    const subPlaylistVideos = useMemo(() => {
+        if (videos.length === 0) return [];
+        // range is 1-indexed
+        const start = Math.max(0, subPlaylistRange[0] - 1);
+        const end = Math.min(videos.length, subPlaylistRange[1]);
+        return videos.slice(start, end);
+    }, [videos, subPlaylistRange]);
+
+    const subPlaylistDuration = useMemo(
+        () => subPlaylistVideos.reduce((total, v) => total + parseDurationToSeconds(v.duration ?? ""), 0),
+        [subPlaylistVideos]
+    );
+
+    const openSubPlaylistDialog = useCallback(() => {
+        if (videos.length < 2) return;
+        const defaultEnd = Math.min(videos.length, 10);
+        setSubPlaylistRange([1, defaultEnd]);
+        setSubPlaylistName("");
+        setSubPlaylistError("");
+        setSubPlaylistSuccess("");
+        setSubPlaylistDialogOpen(true);
+    }, [videos.length]);
+
+    const createSubPlaylist = useCallback(async () => {
+        if (!playlist || subPlaylistVideos.length === 0) return;
+
+        const name = subPlaylistName.trim() || `${playlist.title} (${subPlaylistRange[0]}-${subPlaylistRange[1]})`;
+
+        setCreatingSubPlaylist(true);
+        setSubPlaylistError("");
+        setSubPlaylistSuccess("");
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setSubPlaylistError("Giriş yapmanız gerekiyor.");
+                setCreatingSubPlaylist(false);
+                return;
+            }
+
+            // Create a new playlist entry
+            const { data: newPlaylist, error: insertError } = await supabase
+                .from("youtube_playlists")
+                .insert({
+                    user_id: user.id,
+                    playlist_id: `sub_${playlist.playlist_id}_${Date.now()}`,
+                    title: name,
+                    description: `"${playlist.title}" listesinden oluşturulan alt playlist (Video ${subPlaylistRange[0]}-${subPlaylistRange[1]})`,
+                    thumbnail_url: subPlaylistVideos[0]?.thumbnail_url || playlist.thumbnail_url,
+                    channel_title: playlist.channel_title,
+                    video_count: subPlaylistVideos.length,
+                })
+                .select()
+                .single();
+
+            if (insertError || !newPlaylist) {
+                setSubPlaylistError("Alt playlist oluşturulurken bir hata oluştu.");
+                setCreatingSubPlaylist(false);
+                return;
+            }
+
+            // Copy selected videos to the new playlist
+            const videoRows = subPlaylistVideos.map((v, idx) => ({
+                user_id: user.id,
+                playlist_ref_id: newPlaylist.id,
+                video_id: v.video_id,
+                title: v.title,
+                description: v.description,
+                thumbnail_url: v.thumbnail_url,
+                channel_title: v.channel_title,
+                duration: v.duration,
+                position: idx,
+                is_watched: v.is_watched,
+                watched_at: v.watched_at,
+            }));
+
+            for (let i = 0; i < videoRows.length; i += 50) {
+                const batch = videoRows.slice(i, i + 50);
+                await supabase.from("youtube_videos").insert(batch);
+            }
+
+            setSubPlaylistSuccess(`"${name}" başarıyla oluşturuldu!`);
+            setTimeout(() => {
+                setSubPlaylistDialogOpen(false);
+                router.push(`/youtube/${newPlaylist.id}`);
+            }, 1500);
+        } catch (err) {
+            setSubPlaylistError(err instanceof Error ? err.message : "Bir hata oluştu.");
+        }
+
+        setCreatingSubPlaylist(false);
+    }, [playlist, subPlaylistVideos, subPlaylistName, subPlaylistRange, supabase, router]);
+
     if (initialLoading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
@@ -560,7 +666,194 @@ export default function PlaylistDetailPage() {
                             </div>
                         </DialogContent>
                     </Dialog>
+
+                    {/* Sub-Playlist Creation Button */}
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={openSubPlaylistDialog}
+                        disabled={videos.length < 2}
+                        className="gap-1.5 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    >
+                        <Scissors className="h-4 w-4" />
+                        Alt Playlist
+                    </Button>
                 </div>
+
+                {/* Sub-Playlist Dialog */}
+                <Dialog
+                    open={subPlaylistDialogOpen}
+                    onOpenChange={(open) => {
+                        setSubPlaylistDialogOpen(open);
+                        if (!open) {
+                            setSubPlaylistError("");
+                            setSubPlaylistSuccess("");
+                        }
+                    }}
+                >
+                    <DialogContent className="sm:max-w-lg">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center">
+                                    <Scissors className="h-4 w-4 text-white" />
+                                </div>
+                                Alt Playlist Oluştur
+                            </DialogTitle>
+                            <DialogDescription>
+                                Video aralığı seçerek mevcut playlistten yeni bir alt playlist oluşturun.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-5 mt-2">
+                            {/* Playlist Name Input */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-foreground">Playlist Adı</label>
+                                <Input
+                                    placeholder={playlist ? `${playlist.title} (${subPlaylistRange[0]}-${subPlaylistRange[1]})` : "Alt Playlist"}
+                                    value={subPlaylistName}
+                                    onChange={(e) => setSubPlaylistName(e.target.value)}
+                                    disabled={creatingSubPlaylist}
+                                    className="h-10"
+                                />
+                            </div>
+
+                            {/* Range selector */}
+                            <div className="space-y-3">
+                                <label className="text-sm font-medium text-foreground">Video Aralığı</label>
+
+                                {/* Range info cards */}
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div className="bg-card/80 rounded-xl p-3 border border-border/50 text-center">
+                                        <p className="text-lg font-bold text-red-400">{subPlaylistRange[0]}</p>
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Başlangıç</p>
+                                    </div>
+                                    <div className="bg-card/80 rounded-xl p-3 border border-border/50 text-center">
+                                        <p className="text-lg font-bold text-rose-400">{subPlaylistRange[1]}</p>
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Bitiş</p>
+                                    </div>
+                                    <div className="bg-card/80 rounded-xl p-3 border border-border/50 text-center">
+                                        <p className="text-lg font-bold text-amber-400">{subPlaylistVideos.length}</p>
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Video</p>
+                                    </div>
+                                </div>
+
+                                {/* Dual Range Slider */}
+                                <div className="px-1">
+                                    <Slider
+                                        min={1}
+                                        max={videos.length}
+                                        value={subPlaylistRange}
+                                        onValueChange={setSubPlaylistRange}
+                                        step={1}
+                                    />
+                                    <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                                        <span>1</span>
+                                        <span>{videos.length}</span>
+                                    </div>
+                                </div>
+
+                                {/* Manual input for precise range */}
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        max={subPlaylistRange[1]}
+                                        value={subPlaylistRange[0]}
+                                        onChange={(e) => {
+                                            const val = Math.max(1, Math.min(Number(e.target.value), subPlaylistRange[1]));
+                                            setSubPlaylistRange([val, subPlaylistRange[1]]);
+                                        }}
+                                        disabled={creatingSubPlaylist}
+                                        className="h-9 text-center text-sm"
+                                    />
+                                    <span className="text-muted-foreground text-sm font-medium">—</span>
+                                    <Input
+                                        type="number"
+                                        min={subPlaylistRange[0]}
+                                        max={videos.length}
+                                        value={subPlaylistRange[1]}
+                                        onChange={(e) => {
+                                            const val = Math.max(subPlaylistRange[0], Math.min(Number(e.target.value), videos.length));
+                                            setSubPlaylistRange([subPlaylistRange[0], val]);
+                                        }}
+                                        disabled={creatingSubPlaylist}
+                                        className="h-9 text-center text-sm"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Duration info */}
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-card/50 rounded-lg px-3 py-2 border border-border/30">
+                                <Clock className="h-4 w-4 text-sky-400" />
+                                <span>Toplam süre: <strong className="text-foreground">{formatClockValue(subPlaylistDuration)}</strong></span>
+                            </div>
+
+                            {/* Preview of selected videos */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-foreground">Seçilen Videolar</label>
+                                <div className="max-h-[200px] overflow-y-auto rounded-lg border border-border/50 bg-card/30 divide-y divide-border/30">
+                                    {subPlaylistVideos.map((video, idx) => (
+                                        <div key={video.id} className="flex items-center gap-3 px-3 py-2 hover:bg-accent/30 transition-colors">
+                                            <span className="text-xs text-muted-foreground font-mono w-5 text-right flex-shrink-0">
+                                                {subPlaylistRange[0] + idx}
+                                            </span>
+                                            <div className="flex-shrink-0 w-16 aspect-video rounded overflow-hidden bg-muted">
+                                                <img
+                                                    src={video.thumbnail_url || `https://img.youtube.com/vi/${video.video_id}/mqdefault.jpg`}
+                                                    alt={video.title}
+                                                    className="w-full h-full object-cover"
+                                                    loading="lazy"
+                                                />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-medium line-clamp-1">{video.title}</p>
+                                                {video.duration && (
+                                                    <p className="text-[10px] text-muted-foreground">{video.duration}</p>
+                                                )}
+                                            </div>
+                                            {video.is_watched && (
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Error / Success */}
+                            {subPlaylistError && (
+                                <div className="flex items-start gap-2 text-sm text-destructive">
+                                    <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                    <span>{subPlaylistError}</span>
+                                </div>
+                            )}
+                            {subPlaylistSuccess && (
+                                <div className="flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/10 rounded-lg px-3 py-2">
+                                    <Sparkles className="h-4 w-4 flex-shrink-0" />
+                                    <span>{subPlaylistSuccess}</span>
+                                </div>
+                            )}
+
+                            {/* Create button */}
+                            <Button
+                                onClick={createSubPlaylist}
+                                disabled={creatingSubPlaylist || subPlaylistVideos.length === 0 || !!subPlaylistSuccess}
+                                className="w-full bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white shadow-lg shadow-red-500/20"
+                            >
+                                {creatingSubPlaylist ? (
+                                    <>
+                                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                        Oluşturuluyor...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Scissors className="mr-1.5 h-4 w-4" />
+                                        {subPlaylistVideos.length} Video ile Alt Playlist Oluştur
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
             </div>
 
             {/* Sync message */}
