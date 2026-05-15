@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { YoutubePlaylist } from "@/lib/supabase/types";
 import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
@@ -9,6 +9,8 @@ import {
     fetchPlaylistInfo,
     fetchPlaylistVideos,
     isYoutubeApiConfigured,
+    searchPlaylists,
+    type YTSearchResult,
 } from "@/lib/youtube";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -45,7 +47,9 @@ import {
     Eye,
     EyeOff,
     Lock,
+    Tag,
 } from "lucide-react";
+import { PlaylistTagEditor } from "@/components/playlist-tag-editor";
 
 // Helper: Format date
 function formatDate(dateString: string) {
@@ -68,6 +72,14 @@ export default function YoutubePage() {
     const [addError, setAddError] = useState("");
     const [addProgress, setAddProgress] = useState("");
     const [apiConfigured, setApiConfigured] = useState(true);
+    const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+    const [editingTagsPlaylistId, setEditingTagsPlaylistId] = useState<string | null>(null);
+    const [editingTags, setEditingTags] = useState<string[]>([]);
+    const [dialogTab, setDialogTab] = useState<"url" | "search">("url");
+    const [searchTerm, setSearchTerm] = useState("");
+    const [searchResults, setSearchResults] = useState<YTSearchResult[]>([]);
+    const [searching, setSearching] = useState(false);
+    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const router = useRouter();
     const supabase = useMemo(() => createClient(), []);
 
@@ -150,10 +162,34 @@ export default function YoutubePage() {
         };
     }, [supabase]);
 
-    const addPlaylist = async () => {
+    useEffect(() => {
+        if (dialogTab !== "search") return;
+        const trimmed = searchTerm.trim();
+        if (trimmed.length < 2) {
+            setSearchResults([]);
+            return;
+        }
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = setTimeout(async () => {
+            setSearching(true);
+            try {
+                const results = await searchPlaylists(trimmed);
+                setSearchResults(results);
+            } catch {
+                setSearchResults([]);
+            } finally {
+                setSearching(false);
+            }
+        }, 400);
+        return () => {
+            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        };
+    }, [searchTerm, dialogTab]);
+
+    const addPlaylist = async (overridePlaylistId?: string) => {
         setAddError("");
         setAddProgress("");
-        const playlistId = extractPlaylistId(playlistUrl);
+        const playlistId = overridePlaylistId ?? extractPlaylistId(playlistUrl);
 
         if (!playlistId) {
             setAddError("Geçerli bir YouTube playlist URL'si veya ID'si girin.");
@@ -203,6 +239,7 @@ export default function YoutubePage() {
                     thumbnail_url: playlistInfo.thumbnailUrl,
                     channel_title: playlistInfo.channelTitle,
                     video_count: playlistInfo.videoCount,
+                    tags: [],
                 })
                 .select()
                 .single();
@@ -264,6 +301,11 @@ export default function YoutubePage() {
         await supabase.from("youtube_playlists").delete().eq("id", id);
     }, [supabase]);
 
+    const updateTags = useCallback(async (id: string, newTags: string[]) => {
+        setPlaylists((prev) => prev.map((pl) => (pl.id === id ? { ...pl, tags: newTags } : pl)));
+        await supabase.from("youtube_playlists").update({ tags: newTags }).eq("id", id);
+    }, [supabase]);
+
     const toggleShared = useCallback(async (id: string, current: boolean) => {
         const next = !current;
         // Optimistic update
@@ -278,10 +320,19 @@ export default function YoutubePage() {
         }
     }, [supabase]);
 
-    const filteredPlaylists = useMemo(() => playlists.filter((pl) =>
-        pl.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        pl.channel_title.toLowerCase().includes(searchQuery.toLowerCase())
-    ), [playlists, searchQuery]);
+    const allTags = useMemo(() => {
+        const tagSet = new Set<string>();
+        playlists.forEach((pl) => (pl.tags ?? []).forEach((t) => tagSet.add(t)));
+        return Array.from(tagSet).sort();
+    }, [playlists]);
+
+    const filteredPlaylists = useMemo(() => playlists.filter((pl) => {
+        const matchesSearch =
+            pl.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            pl.channel_title.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesTag = !activeTagFilter || (pl.tags ?? []).includes(activeTagFilter);
+        return matchesSearch && matchesTag;
+    }), [playlists, searchQuery, activeTagFilter]);
 
     // API Key not configured warning
     if (!apiConfigured) {
@@ -355,6 +406,9 @@ export default function YoutubePage() {
                     if (!open) {
                         setAddError("");
                         setAddProgress("");
+                        setDialogTab("url");
+                        setSearchTerm("");
+                        setSearchResults([]);
                     }
                 }}>
                     <DialogTrigger asChild>
@@ -363,63 +417,183 @@ export default function YoutubePage() {
                             Playlist Ekle
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-md">
+                    <DialogContent className="sm:max-w-lg">
                         <DialogHeader>
                             <DialogTitle>YouTube Playlist Ekle</DialogTitle>
-                            <DialogDescription>
-                                Playlist URL&apos;sini yapıştırın. Tüm videolar otomatik olarak çekilecek.
-                            </DialogDescription>
                         </DialogHeader>
-                        <div className="space-y-4 mt-2">
-                            <Input
-                                placeholder="https://youtube.com/playlist?list=PLxxxxx..."
-                                value={playlistUrl}
-                                onChange={(e) => {
-                                    setPlaylistUrl(e.target.value);
-                                    setAddError("");
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !adding) addPlaylist();
-                                }}
-                                disabled={adding}
-                                className="h-11"
-                            />
-                            {addError && (
-                                <div className="flex items-start gap-2 text-sm text-destructive">
-                                    <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                    <span>{addError}</span>
-                                </div>
-                            )}
-                            {addProgress && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
-                                    <span>{addProgress}</span>
-                                </div>
-                            )}
-                            <Button
-                                onClick={addPlaylist}
-                                disabled={adding || !playlistUrl.trim()}
-                                className="w-full bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white"
+
+                        {/* Tab Switcher */}
+                        <div className="flex gap-1 rounded-lg border border-border/50 bg-muted/50 p-1">
+                            <button
+                                onClick={() => setDialogTab("url")}
+                                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                    dialogTab === "url"
+                                        ? "bg-background text-foreground shadow-sm"
+                                        : "text-muted-foreground hover:text-foreground"
+                                }`}
                             >
-                                {adding ? (
-                                    <>
-                                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                                        İçe aktarılıyor...
-                                    </>
-                                ) : (
-                                    <>
-                                        <PlusCircle className="mr-1.5 h-4 w-4" />
-                                        Playlist&apos;i İçe Aktar
-                                    </>
-                                )}
-                            </Button>
+                                URL ile Ekle
+                            </button>
+                            <button
+                                onClick={() => setDialogTab("search")}
+                                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                    dialogTab === "search"
+                                        ? "bg-background text-foreground shadow-sm"
+                                        : "text-muted-foreground hover:text-foreground"
+                                }`}
+                            >
+                                YouTube&apos;da Ara
+                            </button>
                         </div>
+
+                        {/* URL Tab */}
+                        {dialogTab === "url" && (
+                            <div className="space-y-4">
+                                <DialogDescription>
+                                    Playlist URL&apos;sini yapıştırın. Tüm videolar otomatik olarak çekilecek.
+                                </DialogDescription>
+                                <Input
+                                    placeholder="https://youtube.com/playlist?list=PLxxxxx..."
+                                    value={playlistUrl}
+                                    onChange={(e) => {
+                                        setPlaylistUrl(e.target.value);
+                                        setAddError("");
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !adding) addPlaylist();
+                                    }}
+                                    disabled={adding}
+                                    className="h-11"
+                                />
+                                {addError && (
+                                    <div className="flex items-start gap-2 text-sm text-destructive">
+                                        <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                        <span>{addError}</span>
+                                    </div>
+                                )}
+                                {addProgress && (
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                                        <span>{addProgress}</span>
+                                    </div>
+                                )}
+                                <Button
+                                    onClick={() => addPlaylist()}
+                                    disabled={adding || !playlistUrl.trim()}
+                                    className="w-full bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white"
+                                >
+                                    {adding ? (
+                                        <>
+                                            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                            İçe aktarılıyor...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <PlusCircle className="mr-1.5 h-4 w-4" />
+                                            Playlist&apos;i İçe Aktar
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        )}
+
+                        {/* Search Tab */}
+                        {dialogTab === "search" && (
+                            <div className="space-y-3">
+                                <DialogDescription>
+                                    YouTube&apos;da playlist ara ve koleksiyonuna tek tıkla ekle.
+                                    <span className="block text-[11px] mt-0.5 text-amber-500/80">
+                                        Arama API quota tüketir — debounce uygulanıyor.
+                                    </span>
+                                </DialogDescription>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Arama yap… (min. 2 karakter)"
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="pl-10 h-11"
+                                        autoFocus
+                                    />
+                                </div>
+                                {searching && (
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Aranıyor…
+                                    </div>
+                                )}
+                                {addProgress && (
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                                        <span>{addProgress}</span>
+                                    </div>
+                                )}
+                                {addError && (
+                                    <div className="flex items-start gap-2 text-sm text-destructive">
+                                        <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                        <span>{addError}</span>
+                                    </div>
+                                )}
+                                {searchResults.length > 0 && !searching && (
+                                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                                        {searchResults.map((result) => (
+                                            <div
+                                                key={result.playlistId}
+                                                className="flex items-center gap-3 rounded-lg border border-border/50 bg-card p-2.5"
+                                            >
+                                                <div className="relative w-20 aspect-video rounded overflow-hidden bg-muted flex-shrink-0">
+                                                    {result.thumbnailUrl ? (
+                                                        // eslint-disable-next-line @next/next/no-img-element
+                                                        <img
+                                                            src={result.thumbnailUrl}
+                                                            alt={result.title}
+                                                            className="w-full h-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-full h-full flex items-center justify-center">
+                                                            <Youtube className="h-5 w-5 text-red-500/40" />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-sm font-medium line-clamp-2 leading-snug">
+                                                        {result.title}
+                                                    </p>
+                                                    {result.channelTitle && (
+                                                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                                            {result.channelTitle}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => addPlaylist(result.playlistId)}
+                                                    disabled={adding}
+                                                    className="flex-shrink-0 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white"
+                                                >
+                                                    {adding ? (
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <PlusCircle className="h-3.5 w-3.5" />
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {!searching && searchTerm.length >= 2 && searchResults.length === 0 && (
+                                    <p className="text-sm text-muted-foreground text-center py-4">
+                                        Sonuç bulunamadı.
+                                    </p>
+                                )}
+                            </div>
+                        )}
                     </DialogContent>
                 </Dialog>
             </div>
 
             {/* Search */}
-            <div className="relative mb-6">
+            <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                     placeholder="Playlistlerde ara..."
@@ -428,6 +602,58 @@ export default function YoutubePage() {
                     className="pl-10 h-11 bg-card/50 border-border/50"
                 />
             </div>
+
+            {/* Tag Filters */}
+            {allTags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-5">
+                    {allTags.map((tag) => (
+                        <button
+                            key={tag}
+                            onClick={() => setActiveTagFilter(activeTagFilter === tag ? null : tag)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                                activeTagFilter === tag
+                                    ? "bg-red-500 text-white"
+                                    : "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                            }`}
+                        >
+                            <Tag className="h-3 w-3" />
+                            {tag}
+                        </button>
+                    ))}
+                    {activeTagFilter && (
+                        <button
+                            onClick={() => setActiveTagFilter(null)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                            Filtreyi temizle ×
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Tag Editing Dialog */}
+            <Dialog
+                open={!!editingTagsPlaylistId}
+                onOpenChange={(open) => {
+                    if (!open) setEditingTagsPlaylistId(null);
+                }}
+            >
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Tagları Düzenle</DialogTitle>
+                        <DialogDescription>
+                            Playlist&apos;e tag ekleyerek filtreleme yapabilirsin.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <PlaylistTagEditor
+                        tags={editingTags}
+                        onTagsChange={(newTags) => {
+                            setEditingTags(newTags);
+                            if (editingTagsPlaylistId) updateTags(editingTagsPlaylistId, newTags);
+                        }}
+                    />
+                </DialogContent>
+            </Dialog>
 
             {/* Loading */}
             {loading && (
@@ -565,6 +791,16 @@ export default function YoutubePage() {
                                                 <DropdownMenuItem
                                                     onClick={(e) => {
                                                         e.stopPropagation();
+                                                        setEditingTags(playlist.tags ?? []);
+                                                        setEditingTagsPlaylistId(playlist.id);
+                                                    }}
+                                                >
+                                                    <Tag className="mr-2 h-4 w-4" />
+                                                    Tagları Düzenle
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
                                                         deletePlaylist(playlist.id);
                                                     }}
                                                     className="text-destructive focus:text-destructive"
@@ -577,9 +813,21 @@ export default function YoutubePage() {
                                     </div>
 
                                     {playlist.channel_title && (
-                                        <p className="text-xs text-muted-foreground mb-3">
+                                        <p className="text-xs text-muted-foreground mb-2">
                                             {playlist.channel_title}
                                         </p>
+                                    )}
+                                    {(playlist.tags ?? []).length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mb-2">
+                                            {(playlist.tags ?? []).map((tag) => (
+                                                <span
+                                                    key={tag}
+                                                    className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px]"
+                                                >
+                                                    {tag}
+                                                </span>
+                                            ))}
+                                        </div>
                                     )}
 
                                     <div className="flex items-center justify-between text-xs text-muted-foreground">

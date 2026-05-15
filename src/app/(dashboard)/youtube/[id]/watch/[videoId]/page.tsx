@@ -18,7 +18,11 @@ import {
     ChevronRight,
     Send,
     Play,
+    Users,
 } from "lucide-react";
+import { useStudyRoom } from "@/hooks/use-study-room";
+import { StudyRoomPanel } from "@/components/study-room-panel";
+import { getMyProfile, fetchFriendshipsForUser } from "@/lib/friends";
 
 // Format seconds to HH:MM:SS or MM:SS
 function formatTimestamp(seconds: number): string {
@@ -110,6 +114,8 @@ export default function VideoWatchPage() {
     const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
     const [editContent, setEditContent] = useState("");
     const [currentTime, setCurrentTime] = useState(0);
+    const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string } | null>(null);
+    const [acceptedFriendIds, setAcceptedFriendIds] = useState<string[]>([]);
 
     const playerRef = useRef<YTPlayer | null>(null);
     const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -192,11 +198,28 @@ export default function VideoWatchPage() {
                 setNotes(notesData as YoutubeVideoNote[]);
             }
 
-            // Cache user ID for later use
+            // Cache user ID and fetch profile + friends for Study Rooms
             try {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (!cancelled && user) {
                     userIdRef.current = user.id;
+                    const [profileData, friendshipsData] = await Promise.all([
+                        getMyProfile(supabase, user.id),
+                        fetchFriendshipsForUser(supabase, user.id),
+                    ]);
+                    if (!cancelled) {
+                        const acceptedIds = friendshipsData
+                            .filter((f) => f.friendship.status === "accepted")
+                            .map((f) => f.profile.user_id);
+                        setAcceptedFriendIds(acceptedIds);
+                        if (profileData) {
+                            setCurrentUser({
+                                id: user.id,
+                                username: profileData.username,
+                                displayName: profileData.display_name,
+                            });
+                        }
+                    }
                 }
             } catch {
                 // Ignore auth errors
@@ -545,6 +568,15 @@ export default function VideoWatchPage() {
         await supabase.from("youtube_video_notes").delete().eq("id", noteId);
     }, [supabase]);
 
+    const { peers } = useStudyRoom({
+        userId: currentUser?.id ?? null,
+        username: currentUser?.username ?? null,
+        displayName: currentUser?.displayName ?? null,
+        videoDbId: video?.id ?? "",
+        videoTitle: video?.title ?? "",
+        acceptedFriendIds,
+    });
+
     if (initialLoading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
@@ -623,6 +655,19 @@ export default function VideoWatchPage() {
                     >
                         <ExternalLink className="h-3.5 w-3.5" />
                     </Button>
+                    {peers.length > 0 && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSidebarOpen(true)}
+                            className="relative gap-1.5 text-xs text-emerald-500"
+                            title="Aktif arkadaşlar"
+                        >
+                            <Users className="h-3.5 w-3.5" />
+                            {peers.length}
+                            <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        </Button>
+                    )}
                     <Button
                         variant="ghost"
                         size="icon"
@@ -673,6 +718,9 @@ export default function VideoWatchPage() {
                 {/* Right Sidebar */}
                 {sidebarOpen && (
                     <div className="w-96 border-l border-border/30 flex flex-col bg-card/20 flex-shrink-0 min-h-0">
+                        {/* Study Room Panel */}
+                        <StudyRoomPanel peers={peers} currentVideoDbId={video.id} />
+
                         <div className="p-4 border-b border-border/30">
                             <div className="flex items-center gap-2 mb-1">
                                 <StickyNote className="h-4 w-4 text-amber-500" />

@@ -95,3 +95,15 @@ export async function fetchPlaylistVideos(playlistId: string): Promise<YTVideoIt
 export async function fetchVideoInfo(videoId: string): Promise<YTVideoInfo> {
     return callYoutubeApi<YTVideoInfo>("videoInfo", { videoId });
 }
+
+export interface YTSearchResult {
+    playlistId: string;
+    title: string;
+    description: string;
+    thumbnailUrl: string;
+    channelTitle: string;
+}
+
+export async function searchPlaylists(query: string, maxResults = 10): Promise<YTSearchResult[]> {
+    return callYoutubeApi<YTSearchResult[]>("search", { q: query, maxResults: String(maxResults) });
+}

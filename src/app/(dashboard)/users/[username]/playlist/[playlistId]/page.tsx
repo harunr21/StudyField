@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
 import { getProfileByUsername } from "@/lib/friends";
 import type { Profile, YoutubePlaylist, YoutubeVideo } from "@/lib/supabase/types";
@@ -13,6 +14,7 @@ import {
     CheckCircle2,
     Circle,
     Clock,
+    Copy,
     ExternalLink,
     Eye,
     ListVideo,
@@ -23,6 +25,7 @@ import {
 
 export default function FriendPlaylistPage() {
     const params = useParams();
+    const router = useRouter();
     const username = (params.username as string)?.toLowerCase();
     const playlistId = params.playlistId as string;
     const supabase = useMemo(() => createClient(), []);
@@ -33,6 +36,30 @@ export default function FriendPlaylistPage() {
     const [videos, setVideos] = useState<YoutubeVideo[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [filter, setFilter] = useState<"all" | "watched" | "unwatched">("all");
+    const [copying, setCopying] = useState(false);
+    const [copyError, setCopyError] = useState("");
+
+    const copyPlaylist = async () => {
+        setCopying(true);
+        setCopyError("");
+        try {
+            const res = await fetch("/api/playlist/copy", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sourcePlaylistId: playlistId }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setCopyError(data.error ?? "Kopyalama başarısız.");
+                setCopying(false);
+                return;
+            }
+            router.push(`/youtube/${data.newPlaylistId}`);
+        } catch {
+            setCopyError("Bir hata oluştu.");
+            setCopying(false);
+        }
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -152,9 +179,32 @@ export default function FriendPlaylistPage() {
                             <Eye className="h-3.5 w-3.5" />
                             Salt-okunur · @{profile.username}
                         </div>
-                        <h1 className="text-2xl font-bold mb-1">{playlist.title}</h1>
-                        {playlist.channel_title && (
-                            <div className="text-sm text-white/80">{playlist.channel_title}</div>
+                        <div className="flex items-end justify-between gap-3">
+                            <div>
+                                <h1 className="text-2xl font-bold mb-1">{playlist.title}</h1>
+                                {playlist.channel_title && (
+                                    <div className="text-sm text-white/80">{playlist.channel_title}</div>
+                                )}
+                            </div>
+                            <div className="flex-shrink-0">
+                                <Button
+                                    size="sm"
+                                    onClick={copyPlaylist}
+                                    disabled={copying}
+                                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white border-white/30 border"
+                                    variant="outline"
+                                >
+                                    {copying ? (
+                                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                        <Copy className="mr-1.5 h-3.5 w-3.5" />
+                                    )}
+                                    Koleksiyonuma Ekle
+                                </Button>
+                            </div>
+                        </div>
+                        {copyError && (
+                            <p className="mt-2 text-xs text-red-300">{copyError}</p>
                         )}
                     </div>
                 </div>

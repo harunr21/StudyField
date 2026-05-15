@@ -175,3 +175,44 @@ export async function fetchVideoInfoFromYoutube(videoId: string): Promise<YTVide
         durationFormatted: parseDuration(duration),
     };
 }
+
+export interface YTSearchResult {
+    playlistId: string;
+    title: string;
+    description: string;
+    thumbnailUrl: string;
+    channelTitle: string;
+}
+
+export async function searchPlaylistsOnYoutube(
+    query: string,
+    maxResults = 10,
+): Promise<YTSearchResult[]> {
+    const apiKey = getApiKey();
+    const url = `${YOUTUBE_API_BASE}/search?part=snippet&type=playlist&q=${encodeURIComponent(query)}&maxResults=${maxResults}&key=${apiKey}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (errorData as any)?.error?.message || `YouTube API error: ${response.status}`,
+        );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await response.json();
+    if (!data.items) return [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return data.items.map((item: any) => ({
+        playlistId: item.id?.playlistId ?? "",
+        title: item.snippet?.title ?? "",
+        description: item.snippet?.description ?? "",
+        thumbnailUrl:
+            item.snippet?.thumbnails?.medium?.url ||
+            item.snippet?.thumbnails?.default?.url ||
+            "",
+        channelTitle: item.snippet?.channelTitle ?? "",
+    })).filter((r: YTSearchResult) => r.playlistId);
+}

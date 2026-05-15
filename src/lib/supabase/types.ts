@@ -9,6 +9,7 @@ export interface YoutubePlaylist {
     channel_title: string;
     video_count: number;
     is_shared: boolean;
+    tags: string[];
     created_at: string;
     updated_at: string;
 }

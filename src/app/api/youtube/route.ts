@@ -5,6 +5,7 @@ import {
     fetchPlaylistVideosFromYoutube,
     fetchVideoInfoFromYoutube,
     isYoutubeApiConfiguredServer,
+    searchPlaylistsOnYoutube,
 } from "@/lib/youtube-server";
 
 function badRequest(message: string) {
@@ -72,6 +73,16 @@ export async function GET(request: Request) {
             }
 
             const data = await fetchVideoInfoFromYoutube(videoId);
+            return NextResponse.json(data);
+        }
+
+        if (action === "search") {
+            const q = searchParams.get("q");
+            if (!q || q.trim().length < 2) {
+                return badRequest("Arama sorgusu en az 2 karakter olmalıdır.");
+            }
+            const maxResults = Math.min(Number(searchParams.get("maxResults") ?? "10"), 25);
+            const data = await searchPlaylistsOnYoutube(q.trim(), maxResults);
             return NextResponse.json(data);
         }
 
