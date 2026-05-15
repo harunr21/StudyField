@@ -29,6 +29,8 @@ import {
     LogOut,
     ChevronUp,
     PenTool,
+    Users,
+    UserRound,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -41,6 +43,16 @@ const mainNavItems = [
         title: "Çizim Tahtası",
         url: "/whiteboard",
         icon: PenTool,
+    },
+    {
+        title: "Arkadaşlar",
+        url: "/friends",
+        icon: Users,
+    },
+    {
+        title: "Profil",
+        url: "/profile",
+        icon: UserRound,
     },
 ];
 

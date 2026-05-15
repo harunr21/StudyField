@@ -36,6 +36,8 @@ import {
     Scissors,
     Sparkles,
     AlertCircle,
+    Lock,
+    Globe,
 } from "lucide-react";
 import {
     DropdownMenu,
@@ -528,9 +530,45 @@ export default function PlaylistDetailPage() {
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                        <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-2 line-clamp-2">
-                            {playlist.title}
-                        </h1>
+                        <div className="flex items-start gap-3 mb-2">
+                            <h1 className="text-2xl md:text-3xl font-bold tracking-tight line-clamp-2 flex-1">
+                                {playlist.title}
+                            </h1>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                    if (!playlist) return;
+                                    const next = !(playlist.is_shared ?? true);
+                                    setPlaylist({ ...playlist, is_shared: next });
+                                    const { error } = await supabase
+                                        .from("youtube_playlists")
+                                        .update({ is_shared: next })
+                                        .eq("id", playlist.id);
+                                    if (error) {
+                                        setPlaylist({ ...playlist, is_shared: !next });
+                                    }
+                                }}
+                                title={
+                                    playlist.is_shared === false
+                                        ? "Şu an arkadaşlardan gizli — paylaşmak için tıkla"
+                                        : "Arkadaşların görüyor — gizlemek için tıkla"
+                                }
+                                className="flex-shrink-0"
+                            >
+                                {playlist.is_shared === false ? (
+                                    <>
+                                        <Lock className="mr-1.5 h-4 w-4" />
+                                        Gizli
+                                    </>
+                                ) : (
+                                    <>
+                                        <Globe className="mr-1.5 h-4 w-4 text-emerald-500" />
+                                        Arkadaşlara açık
+                                    </>
+                                )}
+                            </Button>
+                        </div>
                         {playlist.channel_title && (
                             <p className="text-muted-foreground mb-4">{playlist.channel_title}</p>
                         )}

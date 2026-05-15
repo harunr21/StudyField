@@ -42,6 +42,9 @@ import {
     Play,
     AlertCircle,
     KeyRound,
+    Eye,
+    EyeOff,
+    Lock,
 } from "lucide-react";
 
 // Helper: Format date
@@ -259,6 +262,20 @@ export default function YoutubePage() {
             return next;
         });
         await supabase.from("youtube_playlists").delete().eq("id", id);
+    }, [supabase]);
+
+    const toggleShared = useCallback(async (id: string, current: boolean) => {
+        const next = !current;
+        // Optimistic update
+        setPlaylists(prev => prev.map(pl => (pl.id === id ? { ...pl, is_shared: next } : pl)));
+        const { error } = await supabase
+            .from("youtube_playlists")
+            .update({ is_shared: next })
+            .eq("id", id);
+        if (error) {
+            // Roll back
+            setPlaylists(prev => prev.map(pl => (pl.id === id ? { ...pl, is_shared: current } : pl)));
+        }
     }, [supabase]);
 
     const filteredPlaylists = useMemo(() => playlists.filter((pl) =>
@@ -479,6 +496,13 @@ export default function YoutubePage() {
                                             </div>
                                         </div>
                                     </div>
+                                    {/* Hidden badge */}
+                                    {playlist.is_shared === false && (
+                                        <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-md flex items-center gap-1">
+                                            <Lock className="h-3 w-3" />
+                                            Gizli
+                                        </div>
+                                    )}
                                     {/* Video count badge */}
                                     <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-md flex items-center gap-1">
                                         <ListVideo className="h-3 w-3" />
@@ -507,18 +531,36 @@ export default function YoutubePage() {
                                                     <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                                                 </button>
                                             </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-48">
+                                            <DropdownMenuContent align="end" className="w-52">
                                                 <DropdownMenuItem
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         window.open(
                                                             `https://www.youtube.com/playlist?list=${playlist.playlist_id}`,
-                                                            "_blank"
+                                                            "noopener,noreferrer"
                                                         );
                                                     }}
                                                 >
                                                     <ExternalLink className="mr-2 h-4 w-4" />
                                                     YouTube&apos;da Aç
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        toggleShared(playlist.id, playlist.is_shared ?? true);
+                                                    }}
+                                                >
+                                                    {playlist.is_shared === false ? (
+                                                        <>
+                                                            <Eye className="mr-2 h-4 w-4" />
+                                                            Arkadaşlara göster
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <EyeOff className="mr-2 h-4 w-4" />
+                                                            Arkadaşlardan gizle
+                                                        </>
+                                                    )}
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     onClick={(e) => {

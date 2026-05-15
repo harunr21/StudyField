@@ -8,6 +8,7 @@ export interface YoutubePlaylist {
     thumbnail_url: string;
     channel_title: string;
     video_count: number;
+    is_shared: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -46,6 +47,25 @@ export interface UserSettings {
     language: "tr" | "en";
     week_starts_on: 0 | 1;
     daily_goal_minutes: number;
+    created_at: string;
+    updated_at: string;
+}
+
+// Profile Types
+export interface Profile {
+    user_id: string;
+    username: string;
+    display_name: string;
+    created_at: string;
+    updated_at: string;
+}
+
+// Friendship Types
+export interface Friendship {
+    id: string;
+    requester_id: string;
+    addressee_id: string;
+    status: "pending" | "accepted";
     created_at: string;
     updated_at: string;
 }
