@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/tldraw/package.json'\\).version\\)\")"
     ]
   }
 }
