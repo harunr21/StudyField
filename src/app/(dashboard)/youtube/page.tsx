@@ -110,9 +110,13 @@ export default function YoutubePage() {
         let cancelled = false;
 
         const fetchPlaylists = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (cancelled || !user) return;
+
             const { data, error } = await supabase
                 .from("youtube_playlists")
                 .select("*")
+                .eq("user_id", user.id)
                 .order("updated_at", { ascending: false });
 
             if (cancelled) return;
@@ -126,6 +130,7 @@ export default function YoutubePage() {
                     const { data: allVideos } = await supabase
                         .from("youtube_videos")
                         .select("playlist_ref_id, is_watched, duration")
+                        .eq("user_id", user.id)
                         .in("playlist_ref_id", playlistIds);
 
                     if (!cancelled) {
@@ -291,6 +296,12 @@ export default function YoutubePage() {
 
     const deletePlaylist = useCallback(async (id: string) => {
         if (!confirm("Bu playlist'i ve tüm videolarını silmek istediğine emin misin?")) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const prevPlaylists = playlists;
+        const prevStats = videoStats;
+
         // Optimistic update
         setPlaylists(prev => prev.filter(pl => pl.id !== id));
         setVideoStats(prev => {
@@ -298,22 +309,38 @@ export default function YoutubePage() {
             delete next[id];
             return next;
         });
-        await supabase.from("youtube_playlists").delete().eq("id", id);
-    }, [supabase]);
+
+        const { error } = await supabase
+            .from("youtube_playlists")
+            .delete()
+            .eq("id", id)
+            .eq("user_id", user.id);
+
+        if (error) {
+            // Roll back on failure
+            setPlaylists(prevPlaylists);
+            setVideoStats(prevStats);
+        }
+    }, [supabase, playlists, videoStats]);
 
     const updateTags = useCallback(async (id: string, newTags: string[]) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
         setPlaylists((prev) => prev.map((pl) => (pl.id === id ? { ...pl, tags: newTags } : pl)));
-        await supabase.from("youtube_playlists").update({ tags: newTags }).eq("id", id);
+        await supabase.from("youtube_playlists").update({ tags: newTags }).eq("id", id).eq("user_id", user.id);
     }, [supabase]);
 
     const toggleShared = useCallback(async (id: string, current: boolean) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
         const next = !current;
         // Optimistic update
         setPlaylists(prev => prev.map(pl => (pl.id === id ? { ...pl, is_shared: next } : pl)));
         const { error } = await supabase
             .from("youtube_playlists")
             .update({ is_shared: next })
-            .eq("id", id);
+            .eq("id", id)
+            .eq("user_id", user.id);
         if (error) {
             // Roll back
             setPlaylists(prev => prev.map(pl => (pl.id === id ? { ...pl, is_shared: current } : pl)));
@@ -763,6 +790,7 @@ export default function YoutubePage() {
                                                         e.stopPropagation();
                                                         window.open(
                                                             `https://www.youtube.com/playlist?list=${playlist.playlist_id}`,
+                                                            "_blank",
                                                             "noopener,noreferrer"
                                                         );
                                                     }}
