@@ -19,6 +19,8 @@ import {
     Send,
     Play,
     Users,
+    Camera,
+    Check,
 } from "lucide-react";
 import { useStudyRoom } from "@/hooks/use-study-room";
 import { StudyRoomPanel } from "@/components/study-room-panel";
@@ -116,7 +118,10 @@ export default function VideoWatchPage() {
     const [currentTime, setCurrentTime] = useState(0);
     const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string } | null>(null);
     const [acceptedFriendIds, setAcceptedFriendIds] = useState<string[]>([]);
+    const [screenshotStatus, setScreenshotStatus] = useState<"idle" | "capturing" | "success" | "error">("idle");
+    const [screenshotMessage, setScreenshotMessage] = useState<string>("");
 
+    const screenshotStreamRef = useRef<MediaStream | null>(null);
     const playerRef = useRef<YTPlayer | null>(null);
     const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -453,6 +458,89 @@ export default function VideoWatchPage() {
         }
     }, []);
 
+    const captureScreenshot = useCallback(async () => {
+        setScreenshotStatus("capturing");
+        setScreenshotMessage("");
+
+        try {
+            // Reuse existing stream if user already shared and it's still live
+            let stream = screenshotStreamRef.current;
+            const streamLive = stream && stream.getVideoTracks().some((t) => t.readyState === "live");
+
+            if (!stream || !streamLive) {
+                if (stream) {
+                    stream.getTracks().forEach((t) => t.stop());
+                }
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { frameRate: 30 },
+                    audio: false,
+                    // @ts-expect-error - non-standard but widely supported
+                    preferCurrentTab: true,
+                });
+                screenshotStreamRef.current = stream;
+
+                // Clear our ref when user stops sharing from the browser UI
+                stream.getVideoTracks().forEach((track) => {
+                    track.addEventListener("ended", () => {
+                        if (screenshotStreamRef.current === stream) {
+                            screenshotStreamRef.current = null;
+                        }
+                    });
+                });
+            }
+
+            // Grab a single frame from the stream
+            const videoEl = document.createElement("video");
+            videoEl.srcObject = stream;
+            videoEl.muted = true;
+            await videoEl.play();
+
+            // Wait until video has dimensions
+            if (!videoEl.videoWidth) {
+                await new Promise<void>((resolve) => {
+                    videoEl.onloadedmetadata = () => resolve();
+                });
+            }
+
+            const canvas = document.createElement("canvas");
+            canvas.width = videoEl.videoWidth;
+            canvas.height = videoEl.videoHeight;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("Canvas context yok");
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+            videoEl.pause();
+            videoEl.srcObject = null;
+
+            const blob: Blob = await new Promise((resolve, reject) => {
+                canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Blob olusturulamadi"))), "image/png");
+            });
+
+            await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+
+            setScreenshotStatus("success");
+            setScreenshotMessage("Panoya kopyalandi");
+            setTimeout(() => setScreenshotStatus("idle"), 1800);
+        } catch (e) {
+            console.error("Screenshot error:", e);
+            const msg = e instanceof Error ? e.message : "Bilinmeyen hata";
+            setScreenshotStatus("error");
+            setScreenshotMessage(msg.includes("Permission") || msg.includes("denied") ? "Izin verilmedi" : "Hata");
+            setTimeout(() => setScreenshotStatus("idle"), 2200);
+        }
+    }, []);
+
+    // Stop the screen-share stream when leaving the page
+    useEffect(() => {
+        return () => {
+            const stream = screenshotStreamRef.current;
+            if (stream) {
+                stream.getTracks().forEach((t) => t.stop());
+                screenshotStreamRef.current = null;
+            }
+        };
+    }, []);
+
     const captureCurrentTime = useCallback(() => {
         if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
             try {
@@ -648,8 +736,35 @@ export default function VideoWatchPage() {
                     <Button
                         variant="ghost"
                         size="sm"
+                        onClick={captureScreenshot}
+                        disabled={screenshotStatus === "capturing"}
+                        className={`gap-1.5 text-xs ${
+                            screenshotStatus === "success"
+                                ? "text-emerald-500"
+                                : screenshotStatus === "error"
+                                ? "text-red-500"
+                                : "text-muted-foreground"
+                        }`}
+                        title="Ekran goruntusu al ve panoya kopyala"
+                    >
+                        {screenshotStatus === "capturing" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : screenshotStatus === "success" ? (
+                            <Check className="h-3.5 w-3.5" />
+                        ) : (
+                            <Camera className="h-3.5 w-3.5" />
+                        )}
+                        <span className="hidden md:inline">
+                            {screenshotStatus === "idle" || screenshotStatus === "capturing"
+                                ? "Ekran Goruntusu"
+                                : screenshotMessage}
+                        </span>
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() =>
-                            window.open(`https://www.youtube.com/watch?v=${video.video_id}`, "_blank")
+                            window.open(`https://www.youtube.com/watch?v=${video.video_id}`, "_blank", "noopener,noreferrer")
                         }
                         className="gap-1.5 text-xs"
                     >
