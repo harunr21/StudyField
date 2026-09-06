@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "studyfield",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // next-themes inline script'indeki "__name is not defined" hatasini onler (OpenNext dokumani).
+  "keep_names": false,
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "NEXTJS_ENV": "production"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "studyfield-db",
+      "database_id": "af21bd93-efae-4ffd-a89e-5f0e06bb64e7",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "STUDY_ROOM", "class_name": "StudyRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StudyRoom"] }]
+}

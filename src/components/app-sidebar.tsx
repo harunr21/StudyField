@@ -1,7 +1,7 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
-import { useRouter, usePathname } from "next/navigation";
+import { signOut } from "@/actions/auth";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
     Sidebar,
@@ -23,37 +23,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-    BookOpen,
-    Youtube,
-    LogOut,
-    ChevronUp,
-    PenTool,
-    Users,
-    UserRound,
-} from "lucide-react";
+import { BookOpen, Youtube, LogOut, ChevronUp, PenTool, Users, UserRound } from "lucide-react";
 
 const mainNavItems = [
-    {
-        title: "YouTube",
-        url: "/youtube",
-        icon: Youtube,
-    },
-    {
-        title: "Çizim Tahtası",
-        url: "/whiteboard",
-        icon: PenTool,
-    },
-    {
-        title: "Arkadaşlar",
-        url: "/friends",
-        icon: Users,
-    },
-    {
-        title: "Profil",
-        url: "/profile",
-        icon: UserRound,
-    },
+    { title: "YouTube", url: "/youtube", icon: Youtube },
+    { title: "Çizim Tahtası", url: "/whiteboard", icon: PenTool },
+    { title: "Arkadaşlar", url: "/friends", icon: Users },
+    { title: "Profil", url: "/profile", icon: UserRound },
 ];
 
 interface AppSidebarProps {
@@ -61,13 +37,10 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ userEmail }: AppSidebarProps) {
-    const router = useRouter();
     const pathname = usePathname();
-    const supabase = createClient();
 
     const handleSignOut = async () => {
-        await supabase.auth.signOut();
-        router.push("/login");
+        await signOut();
     };
 
     const userInitial = userEmail ? userEmail.charAt(0).toUpperCase() : "U";
@@ -84,9 +57,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                 </div>
                                 <div className="flex flex-col gap-0.5 leading-none">
                                     <span className="font-semibold">YouTube Workspace</span>
-                                    <span className="text-xs text-muted-foreground">
-                                        YouTube
-                                    </span>
+                                    <span className="text-xs text-muted-foreground">YouTube</span>
                                 </div>
                             </Link>
                         </SidebarMenuButton>
@@ -133,7 +104,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                         </AvatarFallback>
                                     </Avatar>
                                     <div className="grid flex-1 text-left text-sm leading-tight">
-                                        <span className="truncate font-semibold">Hesabim</span>
+                                        <span className="truncate font-semibold">Hesabım</span>
                                         <span className="truncate text-xs text-muted-foreground">
                                             {userEmail || "user@email.com"}
                                         </span>
@@ -152,7 +123,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                                     className="cursor-pointer text-destructive focus:text-destructive"
                                 >
                                     <LogOut className="mr-2 h-4 w-4" />
-                                    Cikis Yap
+                                    Çıkış Yap
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>

@@ -1,14 +1,14 @@
 import type { NextConfig } from "next";
-import nextPwa from "@ducanh2912/next-pwa";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
-const withPWA = nextPwa({
-  dest: "public",
-  disable: process.env.NODE_ENV === "development",
-  register: true,
-});
+// `next dev` sirasinda D1 gibi Cloudflare binding'lerini yerel simulasyonla saglar.
+initOpenNextCloudflareForDev();
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  images: {
+    // Worker ortaminda Next image optimizer yok; YouTube thumbnail'lari dogrudan kullanilir.
+    unoptimized: true,
+  },
 };
 
-export default withPWA(nextConfig);
+export default nextConfig;

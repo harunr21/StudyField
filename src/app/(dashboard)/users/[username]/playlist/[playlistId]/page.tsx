@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { copyPlaylist, getFriendPlaylistView } from "@/actions/playlists";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
-import { getProfileByUsername } from "@/lib/friends";
-import type { Profile, YoutubePlaylist, YoutubeVideo } from "@/lib/supabase/types";
+import type { Profile, YoutubePlaylist, YoutubeVideo } from "@/lib/types";
 import {
     ArrowLeft,
     CheckCircle2,
@@ -28,7 +27,6 @@ export default function FriendPlaylistPage() {
     const router = useRouter();
     const username = (params.username as string)?.toLowerCase();
     const playlistId = params.playlistId as string;
-    const supabase = useMemo(() => createClient(), []);
 
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<Profile | null>(null);
@@ -39,69 +37,31 @@ export default function FriendPlaylistPage() {
     const [copying, setCopying] = useState(false);
     const [copyError, setCopyError] = useState("");
 
-    const copyPlaylist = async () => {
+    const handleCopy = async () => {
         setCopying(true);
         setCopyError("");
-        try {
-            const res = await fetch("/api/playlist/copy", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sourcePlaylistId: playlistId }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                setCopyError(data.error ?? "Kopyalama başarısız.");
-                setCopying(false);
-                return;
-            }
-            router.push(`/youtube/${data.newPlaylistId}`);
-        } catch {
-            setCopyError("Bir hata oluştu.");
+        const res = await copyPlaylist(playlistId);
+        if (res.error || !res.newPlaylistId) {
+            setCopyError(res.error ?? "Kopyalama başarısız.");
             setCopying(false);
+            return;
         }
+        router.push(`/youtube/${res.newPlaylistId}`);
     };
 
     useEffect(() => {
         let cancelled = false;
-        const load = async () => {
-            const targetProfile = await getProfileByUsername(supabase, username);
+        getFriendPlaylistView(username, playlistId).then((res) => {
             if (cancelled) return;
-            if (!targetProfile) {
-                setLoading(false);
-                return;
-            }
-            setProfile(targetProfile);
-
-            // RLS will return null if not authorized
-            const { data: pl } = await supabase
-                .from("youtube_playlists")
-                .select("*")
-                .eq("id", playlistId)
-                .eq("user_id", targetProfile.user_id)
-                .maybeSingle();
-
-            if (cancelled) return;
-            if (!pl) {
-                setLoading(false);
-                return;
-            }
-            setPlaylist(pl as YoutubePlaylist);
-
-            const { data: vids } = await supabase
-                .from("youtube_videos")
-                .select("*")
-                .eq("playlist_ref_id", playlistId)
-                .order("position", { ascending: true });
-
-            if (cancelled) return;
-            setVideos((vids as YoutubeVideo[] | null) ?? []);
+            setProfile(res.profile);
+            setPlaylist(res.playlist);
+            setVideos(res.videos);
             setLoading(false);
-        };
-        load();
+        });
         return () => {
             cancelled = true;
         };
-    }, [supabase, username, playlistId]);
+    }, [username, playlistId]);
 
     if (loading) {
         return (
@@ -123,9 +83,7 @@ export default function FriendPlaylistPage() {
                 </Link>
                 <div className="rounded-xl border border-dashed border-border/50 p-10 text-center">
                     <div className="font-medium mb-1">Liste görünmüyor</div>
-                    <div className="text-sm text-muted-foreground">
-                        Bu liste paylaşılmamış veya görme izniniz yok.
-                    </div>
+                    <div className="text-sm text-muted-foreground">Bu liste paylaşılmamış veya görme izniniz yok.</div>
                 </div>
             </div>
         );
@@ -133,18 +91,13 @@ export default function FriendPlaylistPage() {
 
     const total = videos.length;
     const watched = videos.filter((v) => v.is_watched).length;
-    const durationSeconds = videos.reduce(
-        (acc, v) => acc + parseDurationToSeconds(v.duration ?? ""),
-        0,
-    );
+    const durationSeconds = videos.reduce((acc, v) => acc + parseDurationToSeconds(v.duration ?? ""), 0);
     const progress = total > 0 ? Math.round((watched / total) * 100) : 0;
 
     const filtered = videos.filter((v) => {
         const matchesSearch = !searchQuery || v.title.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesFilter =
-            filter === "all" ||
-            (filter === "watched" && v.is_watched) ||
-            (filter === "unwatched" && !v.is_watched);
+            filter === "all" || (filter === "watched" && v.is_watched) || (filter === "unwatched" && !v.is_watched);
         return matchesSearch && matchesFilter;
     });
 
@@ -158,16 +111,11 @@ export default function FriendPlaylistPage() {
                 {profile.display_name?.trim() || `@${profile.username}`}
             </Link>
 
-            {/* Header */}
             <div className="rounded-2xl border border-border/50 bg-card overflow-hidden mb-6">
                 <div className="aspect-video sm:aspect-[3/1] bg-muted relative">
                     {playlist.thumbnail_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                            src={playlist.thumbnail_url}
-                            alt={playlist.title}
-                            className="w-full h-full object-cover"
-                        />
+                        <img src={playlist.thumbnail_url} alt={playlist.title} className="w-full h-full object-cover" />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-red-500/10 to-rose-500/10">
                             <Youtube className="h-16 w-16 text-red-500/40" />
@@ -182,14 +130,12 @@ export default function FriendPlaylistPage() {
                         <div className="flex items-end justify-between gap-3">
                             <div>
                                 <h1 className="text-2xl font-bold mb-1">{playlist.title}</h1>
-                                {playlist.channel_title && (
-                                    <div className="text-sm text-white/80">{playlist.channel_title}</div>
-                                )}
+                                {playlist.channel_title && <div className="text-sm text-white/80">{playlist.channel_title}</div>}
                             </div>
                             <div className="flex-shrink-0">
                                 <Button
                                     size="sm"
-                                    onClick={copyPlaylist}
+                                    onClick={handleCopy}
                                     disabled={copying}
                                     className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white border-white/30 border"
                                     variant="outline"
@@ -203,27 +149,19 @@ export default function FriendPlaylistPage() {
                                 </Button>
                             </div>
                         </div>
-                        {copyError && (
-                            <p className="mt-2 text-xs text-red-300">{copyError}</p>
-                        )}
+                        {copyError && <p className="mt-2 text-xs text-red-300">{copyError}</p>}
                     </div>
                 </div>
                 <div className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <Stat icon={<ListVideo className="h-4 w-4" />} label="Video" value={String(total)} />
-                    <Stat
-                        icon={<Clock className="h-4 w-4" />}
-                        label="Süre"
-                        value={formatClockValue(durationSeconds)}
-                    />
+                    <Stat icon={<Clock className="h-4 w-4" />} label="Süre" value={formatClockValue(durationSeconds)} />
                     <Stat
                         icon={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
                         label="İzlenen"
                         value={`${watched}/${total}`}
                     />
                     <Stat
-                        icon={
-                            <div className="h-4 w-4 rounded-full border-2 border-red-500 border-r-transparent" />
-                        }
+                        icon={<div className="h-4 w-4 rounded-full border-2 border-red-500 border-r-transparent" />}
                         label="İlerleme"
                         value={`%${progress}`}
                     />
@@ -232,10 +170,11 @@ export default function FriendPlaylistPage() {
                     <div className="px-5 pb-5">
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                             <div
-                                className={`h-full rounded-full transition-all duration-500 ${progress === 100
-                                    ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
-                                    : "bg-gradient-to-r from-red-500 to-rose-500"
-                                    }`}
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                    progress === 100
+                                        ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                                        : "bg-gradient-to-r from-red-500 to-rose-500"
+                                }`}
                                 style={{ width: `${progress}%` }}
                             />
                         </div>
@@ -243,7 +182,6 @@ export default function FriendPlaylistPage() {
                 )}
             </div>
 
-            {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 mb-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -259,10 +197,9 @@ export default function FriendPlaylistPage() {
                         <button
                             key={f}
                             onClick={() => setFilter(f)}
-                            className={`px-3 py-1.5 rounded text-xs font-medium transition ${filter === f
-                                ? "bg-accent text-accent-foreground"
-                                : "text-muted-foreground hover:text-foreground"
-                                }`}
+                            className={`px-3 py-1.5 rounded text-xs font-medium transition ${
+                                filter === f ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                            }`}
                         >
                             {f === "all" ? "Hepsi" : f === "watched" ? "İzlenen" : "İzlenmemiş"}
                         </button>
@@ -270,7 +207,6 @@ export default function FriendPlaylistPage() {
                 </div>
             </div>
 
-            {/* Video list */}
             {filtered.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border/50 p-10 text-center text-sm text-muted-foreground">
                     Eşleşen video yok.
@@ -278,13 +214,8 @@ export default function FriendPlaylistPage() {
             ) : (
                 <div className="space-y-2">
                     {filtered.map((v, i) => (
-                        <div
-                            key={v.id}
-                            className="flex items-center gap-3 rounded-xl border border-border/50 bg-card p-3"
-                        >
-                            <div className="text-xs text-muted-foreground w-6 text-right flex-shrink-0">
-                                {i + 1}
-                            </div>
+                        <div key={v.id} className="flex items-center gap-3 rounded-xl border border-border/50 bg-card p-3">
+                            <div className="text-xs text-muted-foreground w-6 text-right flex-shrink-0">{i + 1}</div>
                             {v.is_watched ? (
                                 <CheckCircle2 className="h-5 w-5 text-emerald-500 flex-shrink-0" />
                             ) : (
@@ -293,11 +224,7 @@ export default function FriendPlaylistPage() {
                             <div className="relative w-32 aspect-video rounded-md overflow-hidden bg-muted flex-shrink-0">
                                 {v.thumbnail_url ? (
                                     // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        src={v.thumbnail_url}
-                                        alt={v.title}
-                                        className="w-full h-full object-cover"
-                                    />
+                                    <img src={v.thumbnail_url} alt={v.title} className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
                                         <Youtube className="h-6 w-6 text-red-500/40" />
@@ -310,13 +237,9 @@ export default function FriendPlaylistPage() {
                                 )}
                             </div>
                             <div className="min-w-0 flex-1">
-                                <div className="font-medium text-sm line-clamp-2 leading-snug">
-                                    {v.title}
-                                </div>
+                                <div className="font-medium text-sm line-clamp-2 leading-snug">{v.title}</div>
                                 {v.channel_title && (
-                                    <div className="text-xs text-muted-foreground mt-1 truncate">
-                                        {v.channel_title}
-                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1 truncate">{v.channel_title}</div>
                                 )}
                             </div>
                             <a
@@ -336,15 +259,7 @@ export default function FriendPlaylistPage() {
     );
 }
 
-function Stat({
-    icon,
-    label,
-    value,
-}: {
-    icon: React.ReactNode;
-    label: string;
-    value: string;
-}) {
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
     return (
         <div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">

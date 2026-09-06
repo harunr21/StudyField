@@ -47,3 +47,11 @@ public/sw.js
 public/workbox-*.js
 public/worker-*.js
 public/swe-worker-*.js
+
+# Cloudflare / OpenNext
+.open-next
+.wrangler
+.dev.vars
+cloudflare-env.d.ts
+drizzle/
+scripts/out/

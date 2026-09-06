@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
 import {
-    getFriendshipBetween,
-    getProfileByUsername,
-} from "@/lib/friends";
-import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
-import type { Friendship, Profile, YoutubePlaylist } from "@/lib/supabase/types";
+    acceptFriendship,
+    getPublicProfileView,
+    removeFriendship,
+    sendFriendRequestToUser,
+    type RelationshipState,
+} from "@/actions/friends";
+import { Button } from "@/components/ui/button";
+import { formatClockValue } from "@/lib/time";
+import type { PlaylistWithStats, Profile } from "@/lib/types";
 import {
     ArrowLeft,
     CheckCircle2,
@@ -27,21 +29,9 @@ import {
     Youtube,
 } from "lucide-react";
 
-interface PlaylistWithStats extends YoutubePlaylist {
-    stats: { total: number; watched: number; durationSeconds: number };
-}
-
-type RelationshipState =
-    | { kind: "self" }
-    | { kind: "none" }
-    | { kind: "friends"; friendshipId: string }
-    | { kind: "incoming"; friendshipId: string }
-    | { kind: "outgoing"; friendshipId: string };
-
 export default function UserProfilePage() {
     const params = useParams();
     const username = (params.username as string)?.toLowerCase();
-    const supabase = useMemo(() => createClient(), []);
 
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<Profile | null>(null);
@@ -51,107 +41,35 @@ export default function UserProfilePage() {
 
     const load = useCallback(async () => {
         if (!username) return;
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-
-        const targetProfile = await getProfileByUsername(supabase, username);
-
-        if (!targetProfile) {
-            setProfile(null);
-            setLoading(false);
-            return;
-        }
-        setProfile(targetProfile);
-
-        if (user && user.id === targetProfile.user_id) {
-            setRelationship({ kind: "self" });
-        } else if (user) {
-            const f = await getFriendshipBetween(supabase, user.id, targetProfile.user_id);
-            if (!f) {
-                setRelationship({ kind: "none" });
-            } else if (f.status === "accepted") {
-                setRelationship({ kind: "friends", friendshipId: f.id });
-            } else if (f.requester_id === user.id) {
-                setRelationship({ kind: "outgoing", friendshipId: f.id });
-            } else {
-                setRelationship({ kind: "incoming", friendshipId: f.id });
-            }
-        }
-
-        const { data: pls } = await supabase
-            .from("youtube_playlists")
-            .select("*")
-            .eq("user_id", targetProfile.user_id)
-            .order("updated_at", { ascending: false });
-
-        const list = (pls as YoutubePlaylist[] | null) ?? [];
-
-        const playlistIds = list.map((p) => p.id);
-        const statsMap: Record<
-            string,
-            { total: number; watched: number; durationSeconds: number }
-        > = {};
-        for (const id of playlistIds) {
-            statsMap[id] = { total: 0, watched: 0, durationSeconds: 0 };
-        }
-        if (playlistIds.length > 0) {
-            const { data: vids } = await supabase
-                .from("youtube_videos")
-                .select("playlist_ref_id, is_watched, duration")
-                .in("playlist_ref_id", playlistIds);
-            if (vids) {
-                for (const v of vids as Array<{
-                    playlist_ref_id: string;
-                    is_watched: boolean;
-                    duration: string | null;
-                }>) {
-                    const s = statsMap[v.playlist_ref_id];
-                    if (!s) continue;
-                    s.total++;
-                    if (v.is_watched) s.watched++;
-                    s.durationSeconds += parseDurationToSeconds(v.duration ?? "");
-                }
-            }
-        }
-
-        setPlaylists(
-            list.map((p) => ({
-                ...p,
-                stats: statsMap[p.id] ?? { total: 0, watched: 0, durationSeconds: 0 },
-            })),
-        );
+        const res = await getPublicProfileView(username);
+        setProfile(res.profile);
+        setRelationship(res.relationship);
+        setPlaylists(res.playlists);
         setLoading(false);
-    }, [supabase, username]);
+    }, [username]);
 
     useEffect(() => {
-        load();
-    }, [load]);
+        let cancelled = false;
+        (async () => {
+            if (!username) return;
+            const res = await getPublicProfileView(username);
+            if (cancelled) return;
+            setProfile(res.profile);
+            setRelationship(res.relationship);
+            setPlaylists(res.playlists);
+            setLoading(false);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [username]);
 
     const sendFriendRequest = async () => {
         if (!profile) return;
         setActionPending(true);
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) {
-            setActionPending(false);
-            return;
-        }
-        const { data, error } = await supabase
-            .from("friendships")
-            .insert({
-                requester_id: user.id,
-                addressee_id: profile.user_id,
-                status: "pending",
-            })
-            .select()
-            .single();
-        if (!error && data) {
-            setRelationship({
-                kind: "outgoing",
-                friendshipId: (data as Friendship).id,
-            });
+        const res = await sendFriendRequestToUser(profile.user_id);
+        if (res.friendship) {
+            setRelationship({ kind: "outgoing", friendshipId: res.friendship.id });
         }
         setActionPending(false);
     };
@@ -159,24 +77,17 @@ export default function UserProfilePage() {
     const acceptIncoming = async () => {
         if (relationship.kind !== "incoming") return;
         setActionPending(true);
-        await supabase
-            .from("friendships")
-            .update({ status: "accepted" })
-            .eq("id", relationship.friendshipId);
+        await acceptFriendship(relationship.friendshipId);
         await load();
         setActionPending(false);
     };
 
     const cancelOrRemove = async () => {
-        if (
-            relationship.kind !== "outgoing" &&
-            relationship.kind !== "incoming" &&
-            relationship.kind !== "friends"
-        ) {
+        if (relationship.kind !== "outgoing" && relationship.kind !== "incoming" && relationship.kind !== "friends") {
             return;
         }
         setActionPending(true);
-        await supabase.from("friendships").delete().eq("id", relationship.friendshipId);
+        await removeFriendship(relationship.friendshipId);
         setRelationship({ kind: "none" });
         setPlaylists([]);
         setActionPending(false);
@@ -203,9 +114,7 @@ export default function UserProfilePage() {
                 <div className="rounded-xl border border-dashed border-border/50 p-10 text-center">
                     <UserRound className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                     <div className="font-medium mb-1">Kullanıcı bulunamadı</div>
-                    <div className="text-sm text-muted-foreground">
-                        @{username} adlı bir kullanıcı yok.
-                    </div>
+                    <div className="text-sm text-muted-foreground">@{username} adlı bir kullanıcı yok.</div>
                 </div>
             </div>
         );
@@ -216,15 +125,11 @@ export default function UserProfilePage() {
 
     return (
         <div className="p-6 md:p-10 max-w-5xl mx-auto">
-            <Link
-                href="/friends"
-                className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-6"
-            >
+            <Link href="/friends" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-6">
                 <ArrowLeft className="mr-1.5 h-4 w-4" />
                 Arkadaşlar
             </Link>
 
-            {/* Profile header */}
             <div className="rounded-2xl border border-border/50 bg-card p-6 mb-8 flex flex-col sm:flex-row sm:items-center gap-5">
                 <div className="h-20 w-20 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white text-3xl font-semibold flex items-center justify-center shadow-md flex-shrink-0">
                     {initial}
@@ -260,11 +165,7 @@ export default function UserProfilePage() {
                     {relationship.kind === "outgoing" && (
                         <>
                             <span className="text-xs text-muted-foreground">İstek bekliyor</span>
-                            <Button
-                                variant="outline"
-                                onClick={cancelOrRemove}
-                                disabled={actionPending}
-                            >
+                            <Button variant="outline" onClick={cancelOrRemove} disabled={actionPending}>
                                 <X className="mr-1 h-4 w-4" />
                                 Geri al
                             </Button>
@@ -279,11 +180,7 @@ export default function UserProfilePage() {
                             >
                                 Kabul et
                             </Button>
-                            <Button
-                                variant="outline"
-                                onClick={cancelOrRemove}
-                                disabled={actionPending}
-                            >
+                            <Button variant="outline" onClick={cancelOrRemove} disabled={actionPending}>
                                 Reddet
                             </Button>
                         </>
@@ -310,7 +207,6 @@ export default function UserProfilePage() {
                 </div>
             </div>
 
-            {/* Playlists */}
             <div className="mb-3 flex items-center gap-2">
                 <Youtube className="h-4 w-4 text-red-500" />
                 <h2 className="font-semibold">
@@ -322,9 +218,7 @@ export default function UserProfilePage() {
                 <div className="rounded-xl border border-dashed border-border/50 p-10 text-center">
                     <Lock className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                     <div className="font-medium mb-1">İçerik gizli</div>
-                    <div className="text-sm text-muted-foreground">
-                        Oynatma listelerini görmek için önce arkadaş olmalısınız.
-                    </div>
+                    <div className="text-sm text-muted-foreground">Oynatma listelerini görmek için önce arkadaş olmalısınız.</div>
                 </div>
             )}
 
@@ -343,14 +237,9 @@ export default function UserProfilePage() {
             {canSeePlaylists && playlists.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {playlists.map((pl) => {
-                        const progress =
-                            pl.stats.total > 0
-                                ? Math.round((pl.stats.watched / pl.stats.total) * 100)
-                                : 0;
+                        const progress = pl.stats.total > 0 ? Math.round((pl.stats.watched / pl.stats.total) * 100) : 0;
                         const href =
-                            relationship.kind === "self"
-                                ? `/youtube/${pl.id}`
-                                : `/users/${profile.username}/playlist/${pl.id}`;
+                            relationship.kind === "self" ? `/youtube/${pl.id}` : `/users/${profile.username}/playlist/${pl.id}`;
                         return (
                             <Link
                                 key={pl.id}
@@ -393,13 +282,9 @@ export default function UserProfilePage() {
                                     )}
                                 </div>
                                 <div className="p-4">
-                                    <h3 className="font-semibold line-clamp-2 text-sm leading-tight mb-2">
-                                        {pl.title}
-                                    </h3>
+                                    <h3 className="font-semibold line-clamp-2 text-sm leading-tight mb-2">{pl.title}</h3>
                                     {pl.channel_title && (
-                                        <p className="text-xs text-muted-foreground mb-3 truncate">
-                                            {pl.channel_title}
-                                        </p>
+                                        <p className="text-xs text-muted-foreground mb-3 truncate">{pl.channel_title}</p>
                                     )}
                                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                                         <span className="flex items-center gap-1">
@@ -422,19 +307,17 @@ export default function UserProfilePage() {
                                                     <Hourglass className="h-3 w-3" />
                                                     İlerleme
                                                 </span>
-                                                <span
-                                                    className={`font-medium ${progress === 100 ? "text-emerald-500" : "text-red-400"
-                                                        }`}
-                                                >
+                                                <span className={`font-medium ${progress === 100 ? "text-emerald-500" : "text-red-400"}`}>
                                                     %{progress}
                                                 </span>
                                             </div>
                                             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                                                 <div
-                                                    className={`h-full rounded-full transition-all duration-500 ${progress === 100
-                                                        ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
-                                                        : "bg-gradient-to-r from-red-500 to-rose-500"
-                                                        }`}
+                                                    className={`h-full rounded-full transition-all duration-500 ${
+                                                        progress === 100
+                                                            ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                                                            : "bg-gradient-to-r from-red-500 to-rose-500"
+                                                    }`}
                                                     style={{ width: `${progress}%` }}
                                                 />
                                             </div>

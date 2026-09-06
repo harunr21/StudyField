@@ -1,72 +1,33 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE } from "@/lib/auth/session-core";
 
-export async function proxy(request: NextRequest) {
-    // Skip if Supabase is not configured
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/**
+ * Hafif yonlendirme katmani: sadece oturum cerezinin varligina bakar.
+ * Gercek dogrulama (D1'de oturum sorgusu) sayfa layout'unda ve her Server Action'da yapilir.
+ */
+export function proxy(request: NextRequest) {
+    const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
+    const { pathname } = request.nextUrl;
 
-    if (
-        !supabaseUrl ||
-        !supabaseAnonKey ||
-        supabaseUrl === "your_supabase_url_here" ||
-        supabaseAnonKey === "your_supabase_anon_key_here"
-    ) {
-        // Supabase not configured, skip auth check
-        return NextResponse.next();
-    }
-
-    let supabaseResponse = NextResponse.next({
-        request,
-    });
-
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-        cookies: {
-            getAll() {
-                return request.cookies.getAll();
-            },
-            setAll(cookiesToSet) {
-                cookiesToSet.forEach(({ name, value }) =>
-                    request.cookies.set(name, value)
-                );
-                supabaseResponse = NextResponse.next({
-                    request,
-                });
-                cookiesToSet.forEach(({ name, value, options }) =>
-                    supabaseResponse.cookies.set(name, value, options)
-                );
-            },
-        },
-    });
-
-    // Refresh the user's session
-    const {
-        data: { user },
-    } = await supabase.auth.getUser();
-
-    // If no user and not on login/signup page, redirect to login
-    if (
-        !user &&
-        !request.nextUrl.pathname.startsWith("/login") &&
-        !request.nextUrl.pathname.startsWith("/auth")
-    ) {
+    if (!hasSession && !pathname.startsWith("/login")) {
         const url = request.nextUrl.clone();
         url.pathname = "/login";
+        url.search = "";
         return NextResponse.redirect(url);
     }
 
-    // If user is logged in and on login page, redirect to YouTube workspace
-    if (user && request.nextUrl.pathname.startsWith("/login")) {
+    if (hasSession && pathname.startsWith("/login")) {
         const url = request.nextUrl.clone();
         url.pathname = "/youtube";
+        url.search = "";
         return NextResponse.redirect(url);
     }
 
-    return supabaseResponse;
+    return NextResponse.next();
 }
 
 export const config = {
     matcher: [
-        "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+        "/((?!_next/static|_next/image|favicon.ico|manifest.json|icon.svg|ws/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
     ],
 };

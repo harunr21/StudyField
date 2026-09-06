@@ -1,4 +1,5 @@
-// YouTube Types
+// Uygulama genelinde kullanilan satir tipleri (D1 / Drizzle semasi ile uyumlu).
+
 export interface YoutubePlaylist {
     id: string;
     user_id: string;
@@ -41,18 +42,6 @@ export interface YoutubeVideoNote {
     updated_at: string;
 }
 
-// User Settings Types
-export interface UserSettings {
-    user_id: string;
-    theme: "light" | "dark" | "system";
-    language: "tr" | "en";
-    week_starts_on: 0 | 1;
-    daily_goal_minutes: number;
-    created_at: string;
-    updated_at: string;
-}
-
-// Profile Types
 export interface Profile {
     user_id: string;
     username: string;
@@ -61,7 +50,6 @@ export interface Profile {
     updated_at: string;
 }
 
-// Friendship Types
 export interface Friendship {
     id: string;
     requester_id: string;
@@ -71,19 +59,26 @@ export interface Friendship {
     updated_at: string;
 }
 
-// Study Sessions Types
-export interface StudySession {
-    id: string;
-    user_id: string;
-    source_type: "manual" | "pomodoro" | "youtube" | "pdf" | "notes";
-    source_ref_id: string | null;
-    started_at: string;
-    ended_at: string | null;
-    duration_seconds: number;
-    planned_duration_seconds: number | null;
-    focus_score: number | null;
-    notes: string;
-    tag: string | null;
-    created_at: string;
-    updated_at: string;
+export interface FriendshipWithProfile {
+    friendship: Friendship;
+    profile: Profile;
+    /** Mevcut kullaniciya gore: istegi o mu aldi, o mu gonderdi. */
+    direction: "incoming" | "outgoing";
+}
+
+export interface PlaylistStats {
+    total: number;
+    watched: number;
+    durationSeconds: number;
+}
+
+export interface PlaylistWithStats extends YoutubePlaylist {
+    stats: PlaylistStats;
+}
+
+export const USERNAME_REGEX = /^[a-z0-9_]{3,30}$/;
+
+export function deriveInitial(profile: Pick<Profile, "display_name" | "username">): string {
+    const source = profile.display_name?.trim() || profile.username;
+    return source.charAt(0).toUpperCase();
 }

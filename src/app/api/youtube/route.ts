@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth/session";
 import {
     fetchPlaylistInfoFromYoutube,
     fetchPlaylistVideosFromYoutube,
@@ -22,11 +22,7 @@ function internalError(message: string) {
 
 export async function GET(request: Request) {
     try {
-        const supabase = await createClient();
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-
+        const user = await getCurrentUser();
         if (!user) {
             return unauthorized();
         }
@@ -43,37 +39,25 @@ export async function GET(request: Request) {
         }
 
         if (!isYoutubeApiConfiguredServer()) {
-            return internalError("YouTube API key is not configured. Set YOUTUBE_API_KEY in .env.local");
+            return internalError("YouTube API key is not configured. Set YOUTUBE_API_KEY secret.");
         }
 
         if (action === "playlistInfo") {
             const playlistId = searchParams.get("playlistId");
-            if (!playlistId) {
-                return badRequest("playlistId parametresi zorunlu.");
-            }
-
-            const data = await fetchPlaylistInfoFromYoutube(playlistId);
-            return NextResponse.json(data);
+            if (!playlistId) return badRequest("playlistId parametresi zorunlu.");
+            return NextResponse.json(await fetchPlaylistInfoFromYoutube(playlistId));
         }
 
         if (action === "playlistVideos") {
             const playlistId = searchParams.get("playlistId");
-            if (!playlistId) {
-                return badRequest("playlistId parametresi zorunlu.");
-            }
-
-            const data = await fetchPlaylistVideosFromYoutube(playlistId);
-            return NextResponse.json(data);
+            if (!playlistId) return badRequest("playlistId parametresi zorunlu.");
+            return NextResponse.json(await fetchPlaylistVideosFromYoutube(playlistId));
         }
 
         if (action === "videoInfo") {
             const videoId = searchParams.get("videoId");
-            if (!videoId) {
-                return badRequest("videoId parametresi zorunlu.");
-            }
-
-            const data = await fetchVideoInfoFromYoutube(videoId);
-            return NextResponse.json(data);
+            if (!videoId) return badRequest("videoId parametresi zorunlu.");
+            return NextResponse.json(await fetchVideoInfoFromYoutube(videoId));
         }
 
         if (action === "search") {
@@ -82,8 +66,7 @@ export async function GET(request: Request) {
                 return badRequest("Arama sorgusu en az 2 karakter olmalıdır.");
             }
             const maxResults = Math.min(Number(searchParams.get("maxResults") ?? "10"), 25);
-            const data = await searchPlaylistsOnYoutube(q.trim(), maxResults);
-            return NextResponse.json(data);
+            return NextResponse.json(await searchPlaylistsOnYoutube(q.trim(), maxResults));
         }
 
         return badRequest("Bilinmeyen action degeri.");

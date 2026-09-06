@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { YoutubeVideo, YoutubeVideoNote } from "@/lib/supabase/types";
+import {
+    addNote as addNoteAction,
+    deleteNote as deleteNoteAction,
+    getWatchPageData,
+    setVideoWatched,
+    updateNote as updateNoteAction,
+} from "@/actions/videos";
+import type { YoutubeVideo, YoutubeVideoNote } from "@/lib/types";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,38 +30,24 @@ import {
 } from "lucide-react";
 import { useStudyRoom } from "@/hooks/use-study-room";
 import { StudyRoomPanel } from "@/components/study-room-panel";
-import { getMyProfile, fetchFriendshipsForUser } from "@/lib/friends";
 
-// Format seconds to HH:MM:SS or MM:SS
 function formatTimestamp(seconds: number): string {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-
-    if (h > 0) {
-        return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-    }
+    if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
     return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// Parse time input like "1:23" or "1:23:45" to seconds
 function parseTimestamp(input: string): number | null {
     const parts = input.split(":").map(Number);
     if (parts.some(isNaN)) return null;
-
-    if (parts.length === 3) {
-        return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    }
-    if (parts.length === 2) {
-        return parts[0] * 60 + parts[1];
-    }
-    if (parts.length === 1) {
-        return parts[0];
-    }
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 1) return parts[0];
     return null;
 }
 
-// Declare YT types for the embedded player
 declare global {
     interface Window {
         YT: {
@@ -72,13 +64,9 @@ declare global {
                         onStateChange?: (event: { data: number }) => void;
                         onError?: (event: { data: number }) => void;
                     };
-                }
+                },
             ) => YTPlayer;
-            PlayerState: {
-                PLAYING: number;
-                PAUSED: number;
-                ENDED: number;
-            };
+            PlayerState: { PLAYING: number; PAUSED: number; ENDED: number };
         };
         onYouTubeIframeAPIReady: (() => void) | undefined;
     }
@@ -102,9 +90,6 @@ export default function VideoWatchPage() {
     const videoDbId = params.videoId as string;
     const requestedStartAt = Number.parseInt(searchParams.get("t") ?? "0", 10) || 0;
 
-    // Memoize supabase client to prevent re-creation on every render
-    const supabase = useMemo(() => createClient(), []);
-
     const [video, setVideo] = useState<YoutubeVideo | null>(null);
     const [playlistVideos, setPlaylistVideos] = useState<YoutubeVideo[]>([]);
     const [notes, setNotes] = useState<YoutubeVideoNote[]>([]);
@@ -116,8 +101,7 @@ export default function VideoWatchPage() {
     const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
     const [editContent, setEditContent] = useState("");
     const [currentTime, setCurrentTime] = useState(0);
-    const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string } | null>(null);
-    const [acceptedFriendIds, setAcceptedFriendIds] = useState<string[]>([]);
+    const [hasProfile, setHasProfile] = useState(false);
     const [screenshotStatus, setScreenshotStatus] = useState<"idle" | "capturing" | "success" | "error">("idle");
     const [screenshotMessage, setScreenshotMessage] = useState<string>("");
 
@@ -125,140 +109,53 @@ export default function VideoWatchPage() {
     const playerRef = useRef<YTPlayer | null>(null);
     const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const playerContainerRef = useRef<HTMLDivElement>(null);
-    const userIdRef = useRef<string | null>(null);
     const videoRef = useRef<YoutubeVideo | null>(null);
 
-    // Keep videoRef in sync so event handlers can access latest video state
     useEffect(() => {
         videoRef.current = video;
     }, [video]);
 
-    // Fetch only notes (lightweight, no loading spinner)
-    const refreshNotes = useCallback(async () => {
-        const { data: notesData } = await supabase
-            .from("youtube_video_notes")
-            .select("*")
-            .eq("video_ref_id", videoDbId)
-            .order("timestamp_seconds", { ascending: true });
-
-        if (notesData) {
-            setNotes(notesData as YoutubeVideoNote[]);
-        }
-    }, [videoDbId, supabase]);
-
-    // Mark video as watched (using ref to avoid stale closure)
     const doMarkWatched = useCallback(async () => {
         const v = videoRef.current;
         if (!v) return;
         const watchedAt = new Date().toISOString();
         setVideo({ ...v, is_watched: true, watched_at: watchedAt });
-        await supabase
-            .from("youtube_videos")
-            .update({ is_watched: true, watched_at: watchedAt })
-            .eq("id", v.id);
-    }, [supabase]);
+        await setVideoWatched(v.id, true);
+    }, []);
 
-    // Initial data fetch (only on mount)
     useEffect(() => {
         let cancelled = false;
-
-        const fetchInitialData = async () => {
-            // Fetch video data
-            const { data: vidData, error: vidError } = await supabase
-                .from("youtube_videos")
-                .select("*")
-                .eq("id", videoDbId)
-                .single();
-
+        getWatchPageData(playlistId, videoDbId).then((data) => {
             if (cancelled) return;
-
-            if (vidError || !vidData) {
+            if (!data) {
                 router.push(`/youtube/${playlistId}`);
                 return;
             }
-
-            setVideo(vidData as YoutubeVideo);
-
-            // Fetch playlist videos for previous/next navigation
-            const { data: playlistVideoData } = await supabase
-                .from("youtube_videos")
-                .select("*")
-                .eq("playlist_ref_id", playlistId)
-                .order("position", { ascending: true });
-
-            if (!cancelled && playlistVideoData) {
-                setPlaylistVideos(playlistVideoData as YoutubeVideo[]);
-            }
-
-            // Fetch notes
-            const { data: notesData } = await supabase
-                .from("youtube_video_notes")
-                .select("*")
-                .eq("video_ref_id", videoDbId)
-                .order("timestamp_seconds", { ascending: true });
-
-            if (cancelled) return;
-
-            if (notesData) {
-                setNotes(notesData as YoutubeVideoNote[]);
-            }
-
-            // Cache user ID and fetch profile + friends for Study Rooms
-            try {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (!cancelled && user) {
-                    userIdRef.current = user.id;
-                    const [profileData, friendshipsData] = await Promise.all([
-                        getMyProfile(supabase, user.id),
-                        fetchFriendshipsForUser(supabase, user.id),
-                    ]);
-                    if (!cancelled) {
-                        const acceptedIds = friendshipsData
-                            .filter((f) => f.friendship.status === "accepted")
-                            .map((f) => f.profile.user_id);
-                        setAcceptedFriendIds(acceptedIds);
-                        if (profileData) {
-                            setCurrentUser({
-                                id: user.id,
-                                username: profileData.username,
-                                displayName: profileData.display_name,
-                            });
-                        }
-                    }
-                }
-            } catch {
-                // Ignore auth errors
-            }
-
+            setVideo(data.video);
+            setPlaylistVideos(data.playlistVideos);
+            setNotes(data.notes);
+            setHasProfile(Boolean(data.me));
             setInitialLoading(false);
-        };
-
-        fetchInitialData();
-
+        });
         return () => {
             cancelled = true;
         };
-    }, [videoDbId, playlistId, router, supabase]);
+    }, [videoDbId, playlistId, router]);
 
     const currentVideoIndex = useMemo(
-        () => playlistVideos.findIndex((playlistVideo) => playlistVideo.id === videoDbId),
-        [playlistVideos, videoDbId]
+        () => playlistVideos.findIndex((pv) => pv.id === videoDbId),
+        [playlistVideos, videoDbId],
     );
-
     const previousVideo = currentVideoIndex > 0 ? playlistVideos[currentVideoIndex - 1] : null;
     const nextVideo =
-        currentVideoIndex >= 0 && currentVideoIndex < playlistVideos.length - 1
-            ? playlistVideos[currentVideoIndex + 1]
-            : null;
+        currentVideoIndex >= 0 && currentVideoIndex < playlistVideos.length - 1 ? playlistVideos[currentVideoIndex + 1] : null;
 
     const navigateToPlaylistVideo = useCallback(
-        (targetVideoId: string) => {
-            router.push(`/youtube/${playlistId}/watch/${targetVideoId}`);
-        },
-        [playlistId, router]
+        (targetVideoId: string) => router.push(`/youtube/${playlistId}/watch/${targetVideoId}`),
+        [playlistId, router],
     );
 
-    // Initialize YouTube IFrame API
+    // YouTube IFrame API
     useEffect(() => {
         if (!video) return;
 
@@ -271,23 +168,19 @@ export default function VideoWatchPage() {
             if (isUnmounted) return;
             const container = playerContainerRef.current;
             if (!container) {
-                console.warn("Player container not found, retrying...");
-                // Retry after a short delay
                 initTimeout = setTimeout(initPlayer, 300);
                 return;
             }
 
-            // If we already have a player instance, destroy it
             if (playerRef.current) {
                 try {
                     playerRef.current.destroy();
                 } catch {
-                    // Ignore
+                    // yoksay
                 }
                 playerRef.current = null;
             }
 
-            // Create a fresh element for the player
             container.innerHTML = "";
             const playerDiv = document.createElement("div");
             playerDiv.id = `yt-player-${Date.now()}`;
@@ -299,18 +192,11 @@ export default function VideoWatchPage() {
                 const player = new window.YT.Player(playerDiv.id, {
                     width: "100%",
                     height: "100%",
-                    videoId: videoId,
-                    playerVars: {
-                        autoplay: 1,
-                        modestbranding: 1,
-                        rel: 0,
-                        enablejsapi: 1,
-                        playsinline: 1,
-                    },
+                    videoId,
+                    playerVars: { autoplay: 1, modestbranding: 1, rel: 0, enablejsapi: 1, playsinline: 1 },
                     events: {
                         onReady: (event) => {
                             if (isUnmounted) return;
-                            console.log("YouTube player ready");
                             try {
                                 const iframe = event.target.getIframe();
                                 if (iframe) {
@@ -322,44 +208,34 @@ export default function VideoWatchPage() {
                                     iframe.style.border = "none";
                                 }
                             } catch {
-                                // Ignore iframe styling errors
+                                // yoksay
                             }
-
-                            // Start playback explicitly
                             try {
                                 event.target.playVideo();
-                                if (requestedStartAt > 0) {
-                                    event.target.seekTo(requestedStartAt, true);
-                                }
+                                if (requestedStartAt > 0) event.target.seekTo(requestedStartAt, true);
                             } catch {
-                                // Autoplay might be blocked by browser
+                                // autoplay engellenmis olabilir
                             }
-
-                            // Start time tracking
                             if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
                             timeIntervalRef.current = setInterval(() => {
-                                if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+                                if (playerRef.current && typeof playerRef.current.getCurrentTime === "function") {
                                     try {
                                         setCurrentTime(playerRef.current.getCurrentTime());
                                     } catch {
-                                        // Ignore
+                                        // yoksay
                                     }
                                 }
                             }, 1000);
                         },
                         onStateChange: (event: { data: number }) => {
                             if (isUnmounted) return;
-                            // Mark as watched when video ends
                             if (event.data === 0) {
                                 const v = videoRef.current;
-                                if (v && !v.is_watched) {
-                                    doMarkWatched();
-                                }
+                                if (v && !v.is_watched) doMarkWatched();
                             }
                         },
                         onError: (event: { data: number }) => {
                             console.error("YouTube Player Error:", event.data);
-                            // Error codes: 2=invalid param, 5=HTML5 error, 100=not found, 101/150=restricted
                         },
                     },
                 });
@@ -369,23 +245,18 @@ export default function VideoWatchPage() {
             }
         };
 
-        // Load YouTube IFrame API and initialize player
         const startInit = () => {
             initTimeout = setTimeout(() => {
                 if (isUnmounted) return;
-
                 if (window.YT && window.YT.Player) {
                     initPlayer();
                 } else {
-                    // Load script if not already loaded
                     if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
                         const tag = document.createElement("script");
                         tag.src = "https://www.youtube.com/iframe_api";
                         tag.async = true;
                         document.head.appendChild(tag);
                     }
-
-                    // Also try onYouTubeIframeAPIReady callback
                     const prevCallback = window.onYouTubeIframeAPIReady;
                     window.onYouTubeIframeAPIReady = () => {
                         if (prevCallback) prevCallback();
@@ -394,8 +265,6 @@ export default function VideoWatchPage() {
                             initPlayer();
                         }
                     };
-
-                    // Poll as fallback
                     playerInterval = setInterval(() => {
                         if (window.YT && window.YT.Player) {
                             if (playerInterval) clearInterval(playerInterval);
@@ -417,7 +286,7 @@ export default function VideoWatchPage() {
                 try {
                     playerRef.current.destroy();
                 } catch {
-                    // Ignore
+                    // yoksay
                 }
                 playerRef.current = null;
             }
@@ -425,30 +294,16 @@ export default function VideoWatchPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [video?.video_id, requestedStartAt]);
 
-
     const toggleWatched = useCallback(async () => {
         if (!video) return;
         const newWatched = !video.is_watched;
         const watchedAt = newWatched ? new Date().toISOString() : null;
-
-        // Optimistic update
-        setVideo({
-            ...video,
-            is_watched: newWatched,
-            watched_at: watchedAt,
-        });
-
-        await supabase
-            .from("youtube_videos")
-            .update({
-                is_watched: newWatched,
-                watched_at: watchedAt,
-            })
-            .eq("id", video.id);
-    }, [video, supabase]);
+        setVideo({ ...video, is_watched: newWatched, watched_at: watchedAt });
+        await setVideoWatched(video.id, newWatched);
+    }, [video]);
 
     const seekTo = useCallback((seconds: number) => {
-        if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
+        if (playerRef.current && typeof playerRef.current.seekTo === "function") {
             try {
                 playerRef.current.seekTo(seconds, true);
                 playerRef.current.playVideo();
@@ -461,41 +316,29 @@ export default function VideoWatchPage() {
     const captureScreenshot = useCallback(async () => {
         setScreenshotStatus("capturing");
         setScreenshotMessage("");
-
         try {
-            // Reuse existing stream if user already shared and it's still live
             let stream = screenshotStreamRef.current;
             const streamLive = stream && stream.getVideoTracks().some((t) => t.readyState === "live");
-
             if (!stream || !streamLive) {
-                if (stream) {
-                    stream.getTracks().forEach((t) => t.stop());
-                }
+                if (stream) stream.getTracks().forEach((t) => t.stop());
                 stream = await navigator.mediaDevices.getDisplayMedia({
                     video: { frameRate: 30 },
                     audio: false,
-                    // @ts-expect-error - non-standard but widely supported
+                    // @ts-expect-error - standart disi ama yaygin destekleniyor
                     preferCurrentTab: true,
                 });
                 screenshotStreamRef.current = stream;
-
-                // Clear our ref when user stops sharing from the browser UI
                 stream.getVideoTracks().forEach((track) => {
                     track.addEventListener("ended", () => {
-                        if (screenshotStreamRef.current === stream) {
-                            screenshotStreamRef.current = null;
-                        }
+                        if (screenshotStreamRef.current === stream) screenshotStreamRef.current = null;
                     });
                 });
             }
 
-            // Grab a single frame from the stream
             const videoEl = document.createElement("video");
             videoEl.srcObject = stream;
             videoEl.muted = true;
             await videoEl.play();
-
-            // Wait until video has dimensions
             if (!videoEl.videoWidth) {
                 await new Promise<void>((resolve) => {
                     videoEl.onloadedmetadata = () => resolve();
@@ -508,29 +351,26 @@ export default function VideoWatchPage() {
             const ctx = canvas.getContext("2d");
             if (!ctx) throw new Error("Canvas context yok");
             ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
             videoEl.pause();
             videoEl.srcObject = null;
 
             const blob: Blob = await new Promise((resolve, reject) => {
                 canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Blob olusturulamadi"))), "image/png");
             });
-
             await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
 
             setScreenshotStatus("success");
-            setScreenshotMessage("Panoya kopyalandi");
+            setScreenshotMessage("Panoya kopyalandı");
             setTimeout(() => setScreenshotStatus("idle"), 1800);
         } catch (e) {
             console.error("Screenshot error:", e);
             const msg = e instanceof Error ? e.message : "Bilinmeyen hata";
             setScreenshotStatus("error");
-            setScreenshotMessage(msg.includes("Permission") || msg.includes("denied") ? "Izin verilmedi" : "Hata");
+            setScreenshotMessage(msg.includes("Permission") || msg.includes("denied") ? "İzin verilmedi" : "Hata");
             setTimeout(() => setScreenshotStatus("idle"), 2200);
         }
     }, []);
 
-    // Stop the screen-share stream when leaving the page
     useEffect(() => {
         return () => {
             const stream = screenshotStreamRef.current;
@@ -542,10 +382,9 @@ export default function VideoWatchPage() {
     }, []);
 
     const captureCurrentTime = useCallback(() => {
-        if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+        if (playerRef.current && typeof playerRef.current.getCurrentTime === "function") {
             try {
-                const time = Math.floor(playerRef.current.getCurrentTime());
-                setNoteTimestamp(formatTimestamp(time));
+                setNoteTimestamp(formatTimestamp(Math.floor(playerRef.current.getCurrentTime())));
             } catch (e) {
                 console.error("Error capturing time:", e);
             }
@@ -553,116 +392,66 @@ export default function VideoWatchPage() {
     }, []);
 
     const addNote = useCallback(async () => {
-        if (!noteContent.trim()) return;
+        if (!noteContent.trim() || !video) return;
         setSavingNote(true);
-
-        const userId = userIdRef.current;
-        if (!userId) {
-            // Try to fetch user if not cached
-            try {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    userIdRef.current = user.id;
-                } else {
-                    setSavingNote(false);
-                    return;
-                }
-            } catch {
-                setSavingNote(false);
-                return;
-            }
-        }
 
         let timestampSeconds = 0;
         if (noteTimestamp.trim()) {
             const parsed = parseTimestamp(noteTimestamp);
-            if (parsed !== null) {
-                timestampSeconds = parsed;
-            }
-        } else {
-            // Use current player time
-            if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
-                try {
-                    timestampSeconds = Math.floor(playerRef.current.getCurrentTime());
-                } catch {
-                    // Ignore
-                }
+            if (parsed !== null) timestampSeconds = parsed;
+        } else if (playerRef.current && typeof playerRef.current.getCurrentTime === "function") {
+            try {
+                timestampSeconds = Math.floor(playerRef.current.getCurrentTime());
+            } catch {
+                // yoksay
             }
         }
 
-        // Optimistic update: add note to UI immediately
         const tempId = `temp-${Date.now()}`;
         const now = new Date().toISOString();
         const optimisticNote: YoutubeVideoNote = {
             id: tempId,
-            user_id: userIdRef.current!,
+            user_id: video.user_id,
             video_ref_id: videoDbId,
             timestamp_seconds: timestampSeconds,
             content: noteContent.trim(),
             created_at: now,
             updated_at: now,
         };
-
-        setNotes(prev => {
-            const updated = [...prev, optimisticNote];
-            updated.sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
-            return updated;
-        });
-
+        setNotes((prev) => [...prev, optimisticNote].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds));
         setNoteContent("");
         setNoteTimestamp("");
         setSavingNote(false);
 
-        // Actually save to DB in background
-        const { data: insertedNote } = await supabase.from("youtube_video_notes").insert({
-            user_id: userIdRef.current!,
-            video_ref_id: videoDbId,
-            timestamp_seconds: timestampSeconds,
-            content: optimisticNote.content,
-        }).select().single();
-
-        // Replace temp note with real one
-        if (insertedNote) {
-            setNotes(prev =>
-                prev.map(n => n.id === tempId ? (insertedNote as YoutubeVideoNote) : n)
-            );
+        const res = await addNoteAction(videoDbId, timestampSeconds, optimisticNote.content);
+        if (res.note) {
+            setNotes((prev) => prev.map((n) => (n.id === tempId ? res.note! : n)));
         } else {
-            // If insert failed, refresh from server
-            refreshNotes();
+            setNotes((prev) => prev.filter((n) => n.id !== tempId));
         }
-    }, [noteContent, noteTimestamp, videoDbId, supabase, refreshNotes]);
+    }, [noteContent, noteTimestamp, videoDbId, video]);
 
-    const updateNote = useCallback(async (noteId: string) => {
-        if (!editContent.trim()) return;
-        const trimmedContent = editContent.trim();
-
-        // Optimistic update
-        setNotes(prev =>
-            prev.map(n => n.id === noteId ? { ...n, content: trimmedContent } : n)
-        );
-        setEditingNoteId(null);
-        setEditContent("");
-
-        await supabase
-            .from("youtube_video_notes")
-            .update({ content: trimmedContent })
-            .eq("id", noteId);
-    }, [editContent, supabase]);
+    const updateNote = useCallback(
+        async (noteId: string) => {
+            if (!editContent.trim()) return;
+            const trimmed = editContent.trim();
+            setNotes((prev) => prev.map((n) => (n.id === noteId ? { ...n, content: trimmed } : n)));
+            setEditingNoteId(null);
+            setEditContent("");
+            await updateNoteAction(noteId, trimmed);
+        },
+        [editContent],
+    );
 
     const deleteNote = useCallback(async (noteId: string) => {
-        // Optimistic update: remove from UI immediately
-        setNotes(prev => prev.filter(n => n.id !== noteId));
-
-        await supabase.from("youtube_video_notes").delete().eq("id", noteId);
-    }, [supabase]);
+        setNotes((prev) => prev.filter((n) => n.id !== noteId));
+        await deleteNoteAction(noteId);
+    }, []);
 
     const { peers } = useStudyRoom({
-        userId: currentUser?.id ?? null,
-        username: currentUser?.username ?? null,
-        displayName: currentUser?.displayName ?? null,
+        enabled: hasProfile && !initialLoading,
         videoDbId: video?.id ?? "",
         videoTitle: video?.title ?? "",
-        acceptedFriendIds,
     });
 
     if (initialLoading) {
@@ -677,15 +466,9 @@ export default function VideoWatchPage() {
 
     return (
         <div className="h-[calc(100vh-3.5rem)] flex flex-col">
-            {/* Top Bar */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-background/80 backdrop-blur-sm flex-shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => router.push(`/youtube/${playlistId}`)}
-                        className="gap-1.5 flex-shrink-0"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => router.push(`/youtube/${playlistId}`)} className="gap-1.5 flex-shrink-0">
                         <ArrowLeft className="h-4 w-4" />
                         Playlist
                     </Button>
@@ -742,10 +525,10 @@ export default function VideoWatchPage() {
                             screenshotStatus === "success"
                                 ? "text-emerald-500"
                                 : screenshotStatus === "error"
-                                ? "text-red-500"
-                                : "text-muted-foreground"
+                                  ? "text-red-500"
+                                  : "text-muted-foreground"
                         }`}
-                        title="Ekran goruntusu al ve panoya kopyala"
+                        title="Ekran görüntüsü al ve panoya kopyala"
                     >
                         {screenshotStatus === "capturing" ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -755,17 +538,13 @@ export default function VideoWatchPage() {
                             <Camera className="h-3.5 w-3.5" />
                         )}
                         <span className="hidden md:inline">
-                            {screenshotStatus === "idle" || screenshotStatus === "capturing"
-                                ? "Ekran Goruntusu"
-                                : screenshotMessage}
+                            {screenshotStatus === "idle" || screenshotStatus === "capturing" ? "Ekran Görüntüsü" : screenshotMessage}
                         </span>
                     </Button>
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() =>
-                            window.open(`https://www.youtube.com/watch?v=${video.video_id}`, "_blank", "noopener,noreferrer")
-                        }
+                        onClick={() => window.open(`https://www.youtube.com/watch?v=${video.video_id}`, "_blank", "noopener,noreferrer")}
                         className="gap-1.5 text-xs"
                     >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -783,41 +562,25 @@ export default function VideoWatchPage() {
                             <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         </Button>
                     )}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setSidebarOpen(!sidebarOpen)}
-                    >
-                        {sidebarOpen ? (
-                            <ChevronRight className="h-4 w-4" />
-                        ) : (
-                            <ChevronLeft className="h-4 w-4" />
-                        )}
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSidebarOpen(!sidebarOpen)}>
+                        {sidebarOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
                     </Button>
                 </div>
             </div>
 
-            {/* Main Content */}
             <div className="flex-1 flex min-h-0">
-                {/* Video Player */}
-                <div className={`flex-1 flex flex-col min-w-0`}>
-                    <div className="flex-1 bg-black relative" style={{ minHeight: '360px' }} ref={playerContainerRef}></div>
+                <div className="flex-1 flex flex-col min-w-0">
+                    <div className="flex-1 bg-black relative" style={{ minHeight: "360px" }} ref={playerContainerRef}></div>
 
-                    {/* Video Info Bar */}
                     <div className="p-4 border-t border-border/30 bg-card/30 flex-shrink-0">
                         <div className="flex items-center justify-between">
                             <div className="min-w-0">
                                 <h3 className="font-semibold text-sm truncate">{video.title}</h3>
-                                {video.channel_title && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">{video.channel_title}</p>
-                                )}
+                                {video.channel_title && <p className="text-xs text-muted-foreground mt-0.5">{video.channel_title}</p>}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <span className="hidden md:inline">
-                                    {currentVideoIndex >= 0
-                                        ? `${currentVideoIndex + 1}/${playlistVideos.length}`
-                                        : `0/${playlistVideos.length}`}
+                                    {currentVideoIndex >= 0 ? `${currentVideoIndex + 1}/${playlistVideos.length}` : `0/${playlistVideos.length}`}
                                 </span>
                                 <span className="hidden md:inline mx-1">|</span>
                                 <Clock className="h-3.5 w-3.5" />
@@ -830,20 +593,16 @@ export default function VideoWatchPage() {
                     </div>
                 </div>
 
-                {/* Right Sidebar */}
                 {sidebarOpen && (
                     <div className="w-96 border-l border-border/30 flex flex-col bg-card/20 flex-shrink-0 min-h-0">
-                        {/* Study Room Panel */}
                         <StudyRoomPanel peers={peers} currentVideoDbId={video.id} />
 
                         <div className="p-4 border-b border-border/30">
                             <div className="flex items-center gap-2 mb-1">
                                 <StickyNote className="h-4 w-4 text-amber-500" />
-                                <h3 className="font-semibold text-sm">Zaman Damgali Notlar</h3>
+                                <h3 className="font-semibold text-sm">Zaman Damgalı Notlar</h3>
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                                Video anlarina bagli notlar al
-                            </p>
+                            <p className="text-xs text-muted-foreground">Video anlarına bağlı notlar al</p>
                         </div>
 
                         <div className="p-4 border-b border-border/30">
@@ -851,10 +610,10 @@ export default function VideoWatchPage() {
                                 <button
                                     onClick={captureCurrentTime}
                                     className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                                    title="Mevcut zamani yakala"
+                                    title="Mevcut zamanı yakala"
                                 >
                                     <Clock className="h-3 w-3" />
-                                    Zamani Yakala
+                                    Zamanı Yakala
                                 </button>
                                 <input
                                     placeholder="0:00"
@@ -865,7 +624,7 @@ export default function VideoWatchPage() {
                             </div>
                             <div className="flex gap-2">
                                 <textarea
-                                    placeholder="Notunuzu yazin..."
+                                    placeholder="Notunuzu yazın..."
                                     value={noteContent}
                                     onChange={(e) => setNoteContent(e.target.value)}
                                     onKeyDown={(e) => {
@@ -883,107 +642,96 @@ export default function VideoWatchPage() {
                                     disabled={savingNote || !noteContent.trim()}
                                     className="self-end h-9 w-9 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white flex-shrink-0"
                                 >
-                                    {savingNote ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                        <Send className="h-4 w-4" />
-                                    )}
+                                    {savingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                 </Button>
                             </div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-2">
-                                    {notes.length === 0 ? (
-                                        <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-                                            <StickyNote className="h-8 w-8 text-muted-foreground/30 mb-3" />
-                                            <p className="text-sm text-muted-foreground mb-1">Henuz not yok</p>
-                                            <p className="text-xs text-muted-foreground/70">
-                                                Video izlerken onemli anlari not al
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-1.5">
-                                            {notes.map((note) => (
-                                                <div
-                                                    key={note.id}
-                                                    className="group p-3 rounded-xl bg-background/50 border border-border/30 hover:border-border/60 transition-all"
-                                                >
-                                                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                                                        <button
-                                                            onClick={() => seekTo(note.timestamp_seconds)}
-                                                            className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                                                        >
-                                                            <Play className="h-2.5 w-2.5" />
-                                                            {formatTimestamp(note.timestamp_seconds)}
-                                                        </button>
-                                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <button
-                                                                onClick={() => {
-                                                                    setEditingNoteId(note.id);
-                                                                    setEditContent(note.content);
-                                                                }}
-                                                                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                                                                title="Duzenle"
-                                                            >
-                                                                <StickyNote className="h-3 w-3" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => deleteNote(note.id)}
-                                                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                                                title="Sil"
-                                                            >
-                                                                <Trash2 className="h-3 w-3" />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    {editingNoteId === note.id ? (
-                                                        <div className="space-y-2">
-                                                            <textarea
-                                                                value={editContent}
-                                                                onChange={(e) => setEditContent(e.target.value)}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === "Enter" && !e.shiftKey) {
-                                                                        e.preventDefault();
-                                                                        updateNote(note.id);
-                                                                    }
-                                                                    if (e.key === "Escape") {
-                                                                        setEditingNoteId(null);
-                                                                    }
-                                                                }}
-                                                                rows={2}
-                                                                className="w-full text-sm bg-background border border-border/50 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-red-500/50"
-                                                                autoFocus
-                                                            />
-                                                            <div className="flex gap-2 justify-end">
-                                                                <button
-                                                                    onClick={() => setEditingNoteId(null)}
-                                                                    className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground"
-                                                                >
-                                                                    Iptal
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => updateNote(note.id)}
-                                                                    className="text-xs px-2 py-1 bg-red-500/10 text-red-400 rounded-md hover:bg-red-500/20"
-                                                                >
-                                                                    Kaydet
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-                                                            {note.content}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
+                            {notes.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+                                    <StickyNote className="h-8 w-8 text-muted-foreground/30 mb-3" />
+                                    <p className="text-sm text-muted-foreground mb-1">Henüz not yok</p>
+                                    <p className="text-xs text-muted-foreground/70">Video izlerken önemli anları not al</p>
                                 </div>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    {notes.map((note) => (
+                                        <div
+                                            key={note.id}
+                                            className="group p-3 rounded-xl bg-background/50 border border-border/30 hover:border-border/60 transition-all"
+                                        >
+                                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                <button
+                                                    onClick={() => seekTo(note.timestamp_seconds)}
+                                                    className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                                                >
+                                                    <Play className="h-2.5 w-2.5" />
+                                                    {formatTimestamp(note.timestamp_seconds)}
+                                                </button>
+                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => {
+                                                            setEditingNoteId(note.id);
+                                                            setEditContent(note.content);
+                                                        }}
+                                                        className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                                                        title="Düzenle"
+                                                    >
+                                                        <StickyNote className="h-3 w-3" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => deleteNote(note.id)}
+                                                        className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                                                        title="Sil"
+                                                    >
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {editingNoteId === note.id ? (
+                                                <div className="space-y-2">
+                                                    <textarea
+                                                        value={editContent}
+                                                        onChange={(e) => setEditContent(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === "Enter" && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                updateNote(note.id);
+                                                            }
+                                                            if (e.key === "Escape") setEditingNoteId(null);
+                                                        }}
+                                                        rows={2}
+                                                        className="w-full text-sm bg-background border border-border/50 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                                        autoFocus
+                                                    />
+                                                    <div className="flex gap-2 justify-end">
+                                                        <button
+                                                            onClick={() => setEditingNoteId(null)}
+                                                            className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground"
+                                                        >
+                                                            İptal
+                                                        </button>
+                                                        <button
+                                                            onClick={() => updateNote(note.id)}
+                                                            className="text-xs px-2 py-1 bg-red-500/10 text-red-400 rounded-md hover:bg-red-500/20"
+                                                        >
+                                                            Kaydet
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">{note.content}</p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
         </div>
     );
 }
-

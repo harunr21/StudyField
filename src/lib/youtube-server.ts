@@ -1,20 +1,29 @@
 import "server-only";
 
-import type { YTPlaylistInfo, YTVideoInfo, YTVideoItem } from "@/lib/youtube";
+import type { YTPlaylistInfo, YTSearchResult, YTVideoInfo, YTVideoItem } from "@/lib/youtube";
 
 const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 
-function getApiKey(): string {
+/**
+ * API anahtari Cloudflare Worker secret'i olarak tanimlanir (`wrangler secret put YOUTUBE_API_KEY`).
+ * Yerel gelistirmede `.dev.vars` icinden gelir. OpenNext bunu process.env'e kopyalar.
+ */
+function readApiKey(): string | undefined {
     const key = process.env.YOUTUBE_API_KEY;
-    if (!key || key === "YOUR_YOUTUBE_API_KEY_HERE") {
-        throw new Error("YouTube API key is not configured. Set YOUTUBE_API_KEY in .env.local");
+    if (!key || key === "YOUR_YOUTUBE_API_KEY_HERE" || key === "AIzaSy...") return undefined;
+    return key;
+}
+
+function getApiKey(): string {
+    const key = readApiKey();
+    if (!key) {
+        throw new Error("YouTube API key is not configured. Set the YOUTUBE_API_KEY secret.");
     }
     return key;
 }
 
 export function isYoutubeApiConfiguredServer(): boolean {
-    const key = process.env.YOUTUBE_API_KEY;
-    return !!key && key !== "YOUR_YOUTUBE_API_KEY_HERE";
+    return Boolean(readApiKey());
 }
 
 function parseDuration(isoDuration: string): string {
@@ -33,15 +42,17 @@ function parseDuration(isoDuration: string): string {
 
 export async function fetchPlaylistInfoFromYoutube(playlistId: string): Promise<YTPlaylistInfo> {
     const apiKey = getApiKey();
-    const url = `${YOUTUBE_API_BASE}/playlists?part=snippet,contentDetails&id=${playlistId}&key=${apiKey}`;
+    const url = `${YOUTUBE_API_BASE}/playlists?part=snippet,contentDetails&id=${encodeURIComponent(playlistId)}&key=${apiKey}`;
 
     const response = await fetch(url);
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const errorData: any = await response.json().catch(() => ({}));
         throw new Error(errorData?.error?.message || `YouTube API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await response.json();
 
     if (!data.items || data.items.length === 0) {
         throw new Error("Playlist bulunamadı. URL'yi kontrol edin.");
@@ -74,11 +85,12 @@ export async function fetchPlaylistVideosFromYoutube(playlistId: string): Promis
     let hasNextPage = true;
     while (hasNextPage) {
         const pageParam = nextPageToken ? `&pageToken=${nextPageToken}` : "";
-        const url = `${YOUTUBE_API_BASE}/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${playlistId}${pageParam}&key=${apiKey}`;
+        const url = `${YOUTUBE_API_BASE}/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${encodeURIComponent(playlistId)}${pageParam}&key=${apiKey}`;
 
         const response = await fetch(url);
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const errorData: any = await response.json().catch(() => ({}));
             throw new Error(errorData?.error?.message || `YouTube API error: ${response.status}`);
         }
 
@@ -124,7 +136,8 @@ export async function fetchPlaylistVideosFromYoutube(playlistId: string): Promis
                 .then(async (response) => {
                     if (!response.ok) return;
 
-                    const data = await response.json();
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await response.json();
                     if (!data.items) return;
 
                     for (const videoDetail of data.items) {
@@ -136,8 +149,8 @@ export async function fetchPlaylistVideosFromYoutube(playlistId: string): Promis
                     }
                 })
                 .catch(() => {
-                    // Duration fetch is non-critical.
-                })
+                    // Sure bilgisi kritik degil.
+                }),
         );
     }
 
@@ -147,14 +160,15 @@ export async function fetchPlaylistVideosFromYoutube(playlistId: string): Promis
 
 export async function fetchVideoInfoFromYoutube(videoId: string): Promise<YTVideoInfo> {
     const apiKey = getApiKey();
-    const url = `${YOUTUBE_API_BASE}/videos?part=snippet,contentDetails&id=${videoId}&key=${apiKey}`;
+    const url = `${YOUTUBE_API_BASE}/videos?part=snippet,contentDetails&id=${encodeURIComponent(videoId)}&key=${apiKey}`;
 
     const response = await fetch(url);
     if (!response.ok) {
         throw new Error(`YouTube API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await response.json();
     if (!data.items || data.items.length === 0) {
         throw new Error("Video bulunamadı.");
     }
@@ -176,18 +190,7 @@ export async function fetchVideoInfoFromYoutube(videoId: string): Promise<YTVide
     };
 }
 
-export interface YTSearchResult {
-    playlistId: string;
-    title: string;
-    description: string;
-    thumbnailUrl: string;
-    channelTitle: string;
-}
-
-export async function searchPlaylistsOnYoutube(
-    query: string,
-    maxResults = 10,
-): Promise<YTSearchResult[]> {
+export async function searchPlaylistsOnYoutube(query: string, maxResults = 10): Promise<YTSearchResult[]> {
     const apiKey = getApiKey();
     const url = `${YOUTUBE_API_BASE}/search?part=snippet&type=playlist&q=${encodeURIComponent(query)}&maxResults=${maxResults}&key=${apiKey}`;
 
@@ -204,15 +207,16 @@ export async function searchPlaylistsOnYoutube(
     const data: any = await response.json();
     if (!data.items) return [];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return data.items.map((item: any) => ({
-        playlistId: item.id?.playlistId ?? "",
-        title: item.snippet?.title ?? "",
-        description: item.snippet?.description ?? "",
-        thumbnailUrl:
-            item.snippet?.thumbnails?.medium?.url ||
-            item.snippet?.thumbnails?.default?.url ||
-            "",
-        channelTitle: item.snippet?.channelTitle ?? "",
-    })).filter((r: YTSearchResult) => r.playlistId);
+    return (
+        data.items
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((item: any) => ({
+                playlistId: item.id?.playlistId ?? "",
+                title: item.snippet?.title ?? "",
+                description: item.snippet?.description ?? "",
+                thumbnailUrl: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url || "",
+                channelTitle: item.snippet?.channelTitle ?? "",
+            }))
+            .filter((r: YTSearchResult) => r.playlistId)
+    );
 }

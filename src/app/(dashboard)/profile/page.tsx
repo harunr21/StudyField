@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
+import { getMyProfile, saveMyProfile } from "@/actions/profile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { USERNAME_REGEX } from "@/lib/friends";
-import type { Profile } from "@/lib/supabase/types";
+import { USERNAME_REGEX, type Profile } from "@/lib/types";
 import { AlertCircle, CheckCircle2, Loader2, UserRound } from "lucide-react";
 import Link from "next/link";
 
 export default function ProfilePage() {
-    const supabase = useMemo(() => createClient(), []);
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<Profile | null>(null);
     const [userEmail, setUserEmail] = useState<string>("");
@@ -23,37 +21,22 @@ export default function ProfilePage() {
 
     useEffect(() => {
         let cancelled = false;
-        const load = async () => {
-            const {
-                data: { user },
-            } = await supabase.auth.getUser();
-            if (!user) {
-                if (!cancelled) setLoading(false);
-                return;
-            }
-            if (!cancelled) setUserEmail(user.email ?? "");
-
-            const { data } = await supabase
-                .from("profiles")
-                .select("*")
-                .eq("user_id", user.id)
-                .maybeSingle();
-
+        getMyProfile().then((res) => {
             if (cancelled) return;
-
-            if (data) {
-                const p = data as Profile;
-                setProfile(p);
-                setUsername(p.username);
-                setDisplayName(p.display_name);
+            if (res) {
+                setUserEmail(res.email);
+                if (res.profile) {
+                    setProfile(res.profile);
+                    setUsername(res.profile.username);
+                    setDisplayName(res.profile.display_name);
+                }
             }
             setLoading(false);
-        };
-        load();
+        });
         return () => {
             cancelled = true;
         };
-    }, [supabase]);
+    }, []);
 
     const save = async () => {
         setError("");
@@ -61,9 +44,7 @@ export default function ProfilePage() {
 
         const normalized = username.trim().toLowerCase();
         if (!USERNAME_REGEX.test(normalized)) {
-            setError(
-                "Kullanıcı adı 3-30 karakter olmalı, sadece küçük harf, rakam ve _ içerebilir.",
-            );
+            setError("Kullanıcı adı 3-30 karakter olmalı, sadece küçük harf, rakam ve _ içerebilir.");
             return;
         }
         if (displayName.length > 60) {
@@ -72,39 +53,13 @@ export default function ProfilePage() {
         }
 
         setSaving(true);
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) {
-            setSaving(false);
-            setError("Giriş yapmalısınız.");
-            return;
+        const result = await saveMyProfile(normalized, displayName);
+        if (result.error) {
+            setError(result.error);
+        } else if (result.profile) {
+            setProfile(result.profile);
+            setSuccess("Profil kaydedildi.");
         }
-
-        const payload = {
-            user_id: user.id,
-            username: normalized,
-            display_name: displayName.trim(),
-        };
-
-        const { error: upsertError, data } = await supabase
-            .from("profiles")
-            .upsert(payload, { onConflict: "user_id" })
-            .select()
-            .single();
-
-        if (upsertError) {
-            if (upsertError.code === "23505") {
-                setError("Bu kullanıcı adı zaten alınmış.");
-            } else {
-                setError(upsertError.message);
-            }
-            setSaving(false);
-            return;
-        }
-
-        setProfile(data as Profile);
-        setSuccess("Profil kaydedildi.");
         setSaving(false);
     };
 
@@ -127,9 +82,7 @@ export default function ProfilePage() {
                     </div>
                     <h1 className="text-3xl font-bold tracking-tight">Profil</h1>
                 </div>
-                <p className="text-muted-foreground ml-[3px]">
-                    Arkadaşların seni nasıl bulacağını ve göreceğini ayarla.
-                </p>
+                <p className="text-muted-foreground ml-[3px]">Arkadaşların seni nasıl bulacağını ve göreceğini ayarla.</p>
             </div>
 
             <div className="rounded-xl border border-border/50 bg-card p-6 space-y-6">
@@ -141,10 +94,7 @@ export default function ProfilePage() {
                         <div className="text-sm text-muted-foreground">Hesap</div>
                         <div className="font-medium truncate">{userEmail || "—"}</div>
                         {profile?.username && (
-                            <Link
-                                href={`/users/${profile.username}`}
-                                className="text-xs text-violet-400 hover:underline"
-                            >
+                            <Link href={`/users/${profile.username}`} className="text-xs text-violet-400 hover:underline">
                                 Profilini önizle →
                             </Link>
                         )}

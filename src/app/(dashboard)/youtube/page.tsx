@@ -1,17 +1,16 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { YoutubePlaylist } from "@/lib/supabase/types";
-import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
 import {
-    extractPlaylistId,
-    fetchPlaylistInfo,
-    fetchPlaylistVideos,
-    isYoutubeApiConfigured,
-    searchPlaylists,
-    type YTSearchResult,
-} from "@/lib/youtube";
+    addPlaylist as addPlaylistAction,
+    deletePlaylist as deletePlaylistAction,
+    listMyPlaylists,
+    setPlaylistShared,
+    updatePlaylistTags,
+} from "@/actions/playlists";
+import type { PlaylistWithStats } from "@/lib/types";
+import { formatClockValue } from "@/lib/time";
+import { extractPlaylistId, isYoutubeApiConfigured, searchPlaylists, type YTSearchResult } from "@/lib/youtube";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,19 +50,13 @@ import {
 } from "lucide-react";
 import { PlaylistTagEditor } from "@/components/playlist-tag-editor";
 
-// Helper: Format date
 function formatDate(dateString: string) {
     const date = new Date(dateString);
-    return date.toLocaleDateString("tr-TR", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-    });
+    return date.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export default function YoutubePage() {
-    const [playlists, setPlaylists] = useState<YoutubePlaylist[]>([]);
-    const [videoStats, setVideoStats] = useState<Record<string, { total: number; watched: number; durationSeconds: number }>>({});
+    const [playlists, setPlaylists] = useState<PlaylistWithStats[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -81,91 +74,34 @@ export default function YoutubePage() {
     const [searching, setSearching] = useState(false);
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const router = useRouter();
-    const supabase = useMemo(() => createClient(), []);
 
     useEffect(() => {
         let cancelled = false;
-
-        const checkApiConfig = async () => {
-            try {
-                const configured = await isYoutubeApiConfigured();
-                if (!cancelled) {
-                    setApiConfigured(configured);
-                }
-            } catch {
-                if (!cancelled) {
-                    setApiConfigured(false);
-                }
-            }
-        };
-
-        checkApiConfig();
+        isYoutubeApiConfigured()
+            .then((configured) => {
+                if (!cancelled) setApiConfigured(configured);
+            })
+            .catch(() => {
+                if (!cancelled) setApiConfigured(false);
+            });
         return () => {
             cancelled = true;
         };
     }, []);
 
-    // Initial data fetch
     useEffect(() => {
         let cancelled = false;
-
-        const fetchPlaylists = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (cancelled || !user) return;
-
-            const { data, error } = await supabase
-                .from("youtube_playlists")
-                .select("*")
-                .eq("user_id", user.id)
-                .order("updated_at", { ascending: false });
-
-            if (cancelled) return;
-
-            if (!error && data) {
-                setPlaylists(data as YoutubePlaylist[]);
-
-                // Fetch video stats for all playlists efficiently
-                const playlistIds = (data as YoutubePlaylist[]).map((pl) => pl.id);
-                if (playlistIds.length > 0) {
-                    const { data: allVideos } = await supabase
-                        .from("youtube_videos")
-                        .select("playlist_ref_id, is_watched, duration")
-                        .eq("user_id", user.id)
-                        .in("playlist_ref_id", playlistIds);
-
-                    if (!cancelled) {
-                        const stats: Record<string, { total: number; watched: number; durationSeconds: number }> = {};
-
-                        // Initialize stats for all playlists
-                        for (const id of playlistIds) {
-                            stats[id] = { total: 0, watched: 0, durationSeconds: 0 };
-                        }
-
-                        if (allVideos) {
-                            for (const video of allVideos) {
-                                const plId = video.playlist_ref_id;
-                                if (stats[plId]) {
-                                    stats[plId].total++;
-                                    if (video.is_watched) {
-                                        stats[plId].watched++;
-                                    }
-                                    stats[plId].durationSeconds += parseDurationToSeconds(video.duration ?? "");
-                                }
-                            }
-                        }
-                        setVideoStats(stats);
-                    }
-                }
-            }
-            if (!cancelled) setLoading(false);
-        };
-
-        fetchPlaylists();
-
+        listMyPlaylists()
+            .then((data) => {
+                if (!cancelled) setPlaylists(data);
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
         return () => {
             cancelled = true;
         };
-    }, [supabase]);
+    }, []);
 
     useEffect(() => {
         if (dialogTab !== "search") return;
@@ -194,158 +130,53 @@ export default function YoutubePage() {
     const addPlaylist = async (overridePlaylistId?: string) => {
         setAddError("");
         setAddProgress("");
-        const playlistId = overridePlaylistId ?? extractPlaylistId(playlistUrl);
-
-        if (!playlistId) {
+        const input = overridePlaylistId ?? playlistUrl;
+        if (!extractPlaylistId(input)) {
             setAddError("Geçerli bir YouTube playlist URL'si veya ID'si girin.");
             return;
         }
 
         setAdding(true);
-
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user) {
-            setAddError("Giriş yapmanız gerekiyor.");
+        setAddProgress("Playlist ve videolar YouTube'dan çekiliyor...");
+        const result = await addPlaylistAction(input);
+        if (result.error || !result.id) {
+            setAddError(result.error ?? "Bir hata oluştu.");
             setAdding(false);
+            setAddProgress("");
             return;
         }
 
-        // Check if playlist already exists
-        const { data: existing } = await supabase
-            .from("youtube_playlists")
-            .select("id")
-            .eq("user_id", user.id)
-            .eq("playlist_id", playlistId)
-            .single();
-
-        if (existing) {
-            setAddError("Bu playlist zaten eklenmiş.");
-            setAdding(false);
-            return;
-        }
-
-        try {
-            // Step 1: Fetch playlist info from YouTube API v3
-            setAddProgress("Playlist bilgileri çekiliyor...");
-            const playlistInfo = await fetchPlaylistInfo(playlistId);
-
-            // Step 2: Save playlist to Supabase
-            setAddProgress("Playlist kaydediliyor...");
-            const { data: newPlaylist, error: insertError } = await supabase
-                .from("youtube_playlists")
-                .insert({
-                    user_id: user.id,
-                    playlist_id: playlistId,
-                    title: playlistInfo.title,
-                    description: playlistInfo.description,
-                    thumbnail_url: playlistInfo.thumbnailUrl,
-                    channel_title: playlistInfo.channelTitle,
-                    video_count: playlistInfo.videoCount,
-                    tags: [],
-                })
-                .select()
-                .single();
-
-            if (insertError || !newPlaylist) {
-                setAddError("Playlist kaydedilirken bir hata oluştu.");
-                setAdding(false);
-                return;
-            }
-
-            // Step 3: Fetch all videos from the playlist
-            setAddProgress(`Videolar çekiliyor (${playlistInfo.videoCount} video)...`);
-            const videos = await fetchPlaylistVideos(playlistId);
-
-            // Step 4: Save all videos to Supabase
-            setAddProgress(`${videos.length} video kaydediliyor...`);
-            if (videos.length > 0) {
-                const videoRows = videos.map((v) => ({
-                    user_id: user.id,
-                    playlist_ref_id: newPlaylist.id,
-                    video_id: v.videoId,
-                    title: v.title,
-                    description: v.description,
-                    thumbnail_url: v.thumbnailUrl,
-                    channel_title: v.channelTitle,
-                    duration: v.durationFormatted,
-                    position: v.position,
-                }));
-
-                // Insert in batches of 50 to avoid payload limits
-                for (let i = 0; i < videoRows.length; i += 50) {
-                    const batch = videoRows.slice(i, i + 50);
-                    await supabase.from("youtube_videos").insert(batch);
-                    setAddProgress(`Videolar kaydediliyor... (${Math.min(i + 50, videoRows.length)}/${videoRows.length})`);
-                }
-            }
-
-            setPlaylistUrl("");
-            setDialogOpen(false);
-            setAdding(false);
-            setAddProgress("");
-            router.push(`/youtube/${newPlaylist.id}`);
-        } catch (err) {
-            setAddError(err instanceof Error ? err.message : "Bir hata oluştu.");
-            setAdding(false);
-            setAddProgress("");
-        }
+        setPlaylistUrl("");
+        setDialogOpen(false);
+        setAdding(false);
+        setAddProgress("");
+        router.push(`/youtube/${result.id}`);
     };
 
-    const deletePlaylist = useCallback(async (id: string) => {
-        if (!confirm("Bu playlist'i ve tüm videolarını silmek istediğine emin misin?")) return;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const prevPlaylists = playlists;
-        const prevStats = videoStats;
-
-        // Optimistic update
-        setPlaylists(prev => prev.filter(pl => pl.id !== id));
-        setVideoStats(prev => {
-            const next = { ...prev };
-            delete next[id];
-            return next;
-        });
-
-        const { error } = await supabase
-            .from("youtube_playlists")
-            .delete()
-            .eq("id", id)
-            .eq("user_id", user.id);
-
-        if (error) {
-            // Roll back on failure
-            setPlaylists(prevPlaylists);
-            setVideoStats(prevStats);
-        }
-    }, [supabase, playlists, videoStats]);
+    const deletePlaylist = useCallback(
+        async (id: string) => {
+            if (!confirm("Bu playlist'i ve tüm videolarını silmek istediğine emin misin?")) return;
+            const prev = playlists;
+            setPlaylists((p) => p.filter((pl) => pl.id !== id));
+            const res = await deletePlaylistAction(id);
+            if (res.error) setPlaylists(prev);
+        },
+        [playlists],
+    );
 
     const updateTags = useCallback(async (id: string, newTags: string[]) => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
         setPlaylists((prev) => prev.map((pl) => (pl.id === id ? { ...pl, tags: newTags } : pl)));
-        await supabase.from("youtube_playlists").update({ tags: newTags }).eq("id", id).eq("user_id", user.id);
-    }, [supabase]);
+        await updatePlaylistTags(id, newTags);
+    }, []);
 
     const toggleShared = useCallback(async (id: string, current: boolean) => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
         const next = !current;
-        // Optimistic update
-        setPlaylists(prev => prev.map(pl => (pl.id === id ? { ...pl, is_shared: next } : pl)));
-        const { error } = await supabase
-            .from("youtube_playlists")
-            .update({ is_shared: next })
-            .eq("id", id)
-            .eq("user_id", user.id);
-        if (error) {
-            // Roll back
-            setPlaylists(prev => prev.map(pl => (pl.id === id ? { ...pl, is_shared: current } : pl)));
+        setPlaylists((prev) => prev.map((pl) => (pl.id === id ? { ...pl, is_shared: next } : pl)));
+        const res = await setPlaylistShared(id, next);
+        if (res.error) {
+            setPlaylists((prev) => prev.map((pl) => (pl.id === id ? { ...pl, is_shared: current } : pl)));
         }
-    }, [supabase]);
+    }, []);
 
     const allTags = useMemo(() => {
         const tagSet = new Set<string>();
@@ -353,15 +184,17 @@ export default function YoutubePage() {
         return Array.from(tagSet).sort();
     }, [playlists]);
 
-    const filteredPlaylists = useMemo(() => playlists.filter((pl) => {
-        const matchesSearch =
-            pl.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            pl.channel_title.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesTag = !activeTagFilter || (pl.tags ?? []).includes(activeTagFilter);
-        return matchesSearch && matchesTag;
-    }), [playlists, searchQuery, activeTagFilter]);
+    const filteredPlaylists = useMemo(
+        () =>
+            playlists.filter((pl) => {
+                const q = searchQuery.toLowerCase();
+                const matchesSearch = pl.title.toLowerCase().includes(q) || pl.channel_title.toLowerCase().includes(q);
+                const matchesTag = !activeTagFilter || (pl.tags ?? []).includes(activeTagFilter);
+                return matchesSearch && matchesTag;
+            }),
+        [playlists, searchQuery, activeTagFilter],
+    );
 
-    // API Key not configured warning
     if (!apiConfigured) {
         return (
             <div className="p-6 md:p-10 max-w-6xl mx-auto">
@@ -374,39 +207,33 @@ export default function YoutubePage() {
                         YouTube modülünü kullanmak için bir YouTube Data API v3 anahtarı gerekli.
                     </p>
                     <div className="bg-card border border-border/50 rounded-xl p-5 max-w-lg text-left space-y-3">
-                        <div className="flex items-start gap-3">
-                            <span className="flex-shrink-0 h-6 w-6 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold">1</span>
-                            <p className="text-sm text-muted-foreground">
-                                <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-red-400 underline underline-offset-2">Google Cloud Console</a>&apos;a gidin ve bir proje oluşturun.
-                            </p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="flex-shrink-0 h-6 w-6 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold">2</span>
-                            <p className="text-sm text-muted-foreground">
-                                <strong>APIs &amp; Services → Library</strong> bölümünden <strong>YouTube Data API v3</strong>&apos;ü etkinleştirin.
-                            </p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="flex-shrink-0 h-6 w-6 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold">3</span>
-                            <p className="text-sm text-muted-foreground">
-                                <strong>APIs &amp; Services → Credentials</strong> bölümünden bir API anahtarı oluşturun.
-                            </p>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="flex-shrink-0 h-6 w-6 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold">4</span>
-                            <div className="text-sm text-muted-foreground">
-                                <code className="bg-muted px-2 py-0.5 rounded text-xs">.env.local</code> dosyasına API anahtarını ekleyin:
-                                <pre className="bg-muted rounded-lg p-3 mt-2 text-xs overflow-x-auto">
-                                    YOUTUBE_API_KEY=AIzaSy...
-                                </pre>
-                            </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="flex-shrink-0 h-6 w-6 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold">5</span>
-                            <p className="text-sm text-muted-foreground">
-                                Dev sunucusunu yeniden başlatın (<code className="bg-muted px-2 py-0.5 rounded text-xs">npm run dev</code>).
-                            </p>
-                        </div>
+                        <Step n={1}>
+                            <a
+                                href="https://console.cloud.google.com"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-red-400 underline underline-offset-2"
+                            >
+                                Google Cloud Console
+                            </a>
+                            &apos;a gidin ve bir proje oluşturun.
+                        </Step>
+                        <Step n={2}>
+                            <strong>APIs &amp; Services → Library</strong> bölümünden <strong>YouTube Data API v3</strong>&apos;ü
+                            etkinleştirin.
+                        </Step>
+                        <Step n={3}>
+                            <strong>APIs &amp; Services → Credentials</strong> bölümünden bir API anahtarı oluşturun.
+                        </Step>
+                        <Step n={4}>
+                            Anahtarı Cloudflare Worker secret&apos;ı olarak ekleyin:
+                            <pre className="bg-muted rounded-lg p-3 mt-2 text-xs overflow-x-auto">
+                                npx wrangler secret put YOUTUBE_API_KEY
+                            </pre>
+                            Yerel geliştirmede ise <code className="bg-muted px-2 py-0.5 rounded text-xs">.dev.vars</code>{" "}
+                            dosyasına yazın.
+                        </Step>
+                        <Step n={5}>Uygulamayı yeniden dağıtın veya dev sunucusunu yeniden başlatın.</Step>
                     </div>
                 </div>
             </div>
@@ -415,7 +242,6 @@ export default function YoutubePage() {
 
     return (
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
-            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
                 <div>
                     <div className="flex items-center gap-2.5 mb-1">
@@ -424,20 +250,21 @@ export default function YoutubePage() {
                         </div>
                         <h1 className="text-3xl font-bold tracking-tight">YouTube</h1>
                     </div>
-                    <p className="text-muted-foreground ml-[3px]">
-                        Playlist videolarını takip et ve zaman damgalı notlar al.
-                    </p>
+                    <p className="text-muted-foreground ml-[3px]">Playlist videolarını takip et ve zaman damgalı notlar al.</p>
                 </div>
-                <Dialog open={dialogOpen} onOpenChange={(open) => {
-                    setDialogOpen(open);
-                    if (!open) {
-                        setAddError("");
-                        setAddProgress("");
-                        setDialogTab("url");
-                        setSearchTerm("");
-                        setSearchResults([]);
-                    }
-                }}>
+                <Dialog
+                    open={dialogOpen}
+                    onOpenChange={(open) => {
+                        setDialogOpen(open);
+                        if (!open) {
+                            setAddError("");
+                            setAddProgress("");
+                            setDialogTab("url");
+                            setSearchTerm("");
+                            setSearchResults([]);
+                        }
+                    }}
+                >
                     <DialogTrigger asChild>
                         <Button className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white shadow-lg shadow-red-500/25">
                             <PlusCircle className="mr-1.5 h-4 w-4" />
@@ -449,31 +276,22 @@ export default function YoutubePage() {
                             <DialogTitle>YouTube Playlist Ekle</DialogTitle>
                         </DialogHeader>
 
-                        {/* Tab Switcher */}
                         <div className="flex gap-1 rounded-lg border border-border/50 bg-muted/50 p-1">
-                            <button
-                                onClick={() => setDialogTab("url")}
-                                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                    dialogTab === "url"
-                                        ? "bg-background text-foreground shadow-sm"
-                                        : "text-muted-foreground hover:text-foreground"
-                                }`}
-                            >
-                                URL ile Ekle
-                            </button>
-                            <button
-                                onClick={() => setDialogTab("search")}
-                                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                    dialogTab === "search"
-                                        ? "bg-background text-foreground shadow-sm"
-                                        : "text-muted-foreground hover:text-foreground"
-                                }`}
-                            >
-                                YouTube&apos;da Ara
-                            </button>
+                            {(["url", "search"] as const).map((tab) => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setDialogTab(tab)}
+                                    className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                        dialogTab === tab
+                                            ? "bg-background text-foreground shadow-sm"
+                                            : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                >
+                                    {tab === "url" ? "URL ile Ekle" : "YouTube'da Ara"}
+                                </button>
+                            ))}
                         </div>
 
-                        {/* URL Tab */}
                         {dialogTab === "url" && (
                             <div className="space-y-4">
                                 <DialogDescription>
@@ -524,7 +342,6 @@ export default function YoutubePage() {
                             </div>
                         )}
 
-                        {/* Search Tab */}
                         {dialogTab === "search" && (
                             <div className="space-y-3">
                                 <DialogDescription>
@@ -571,11 +388,7 @@ export default function YoutubePage() {
                                                 <div className="relative w-20 aspect-video rounded overflow-hidden bg-muted flex-shrink-0">
                                                     {result.thumbnailUrl ? (
                                                         // eslint-disable-next-line @next/next/no-img-element
-                                                        <img
-                                                            src={result.thumbnailUrl}
-                                                            alt={result.title}
-                                                            className="w-full h-full object-cover"
-                                                        />
+                                                        <img src={result.thumbnailUrl} alt={result.title} className="w-full h-full object-cover" />
                                                     ) : (
                                                         <div className="w-full h-full flex items-center justify-center">
                                                             <Youtube className="h-5 w-5 text-red-500/40" />
@@ -583,13 +396,9 @@ export default function YoutubePage() {
                                                     )}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <p className="text-sm font-medium line-clamp-2 leading-snug">
-                                                        {result.title}
-                                                    </p>
+                                                    <p className="text-sm font-medium line-clamp-2 leading-snug">{result.title}</p>
                                                     {result.channelTitle && (
-                                                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                                            {result.channelTitle}
-                                                        </p>
+                                                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{result.channelTitle}</p>
                                                     )}
                                                 </div>
                                                 <Button
@@ -609,9 +418,7 @@ export default function YoutubePage() {
                                     </div>
                                 )}
                                 {!searching && searchTerm.length >= 2 && searchResults.length === 0 && (
-                                    <p className="text-sm text-muted-foreground text-center py-4">
-                                        Sonuç bulunamadı.
-                                    </p>
+                                    <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı.</p>
                                 )}
                             </div>
                         )}
@@ -619,7 +426,6 @@ export default function YoutubePage() {
                 </Dialog>
             </div>
 
-            {/* Search */}
             <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -630,7 +436,6 @@ export default function YoutubePage() {
                 />
             </div>
 
-            {/* Tag Filters */}
             {allTags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-5">
                     {allTags.map((tag) => (
@@ -638,9 +443,7 @@ export default function YoutubePage() {
                             key={tag}
                             onClick={() => setActiveTagFilter(activeTagFilter === tag ? null : tag)}
                             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                                activeTagFilter === tag
-                                    ? "bg-red-500 text-white"
-                                    : "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                                activeTagFilter === tag ? "bg-red-500 text-white" : "bg-red-500/10 text-red-400 hover:bg-red-500/20"
                             }`}
                         >
                             <Tag className="h-3 w-3" />
@@ -658,7 +461,6 @@ export default function YoutubePage() {
                 </div>
             )}
 
-            {/* Tag Editing Dialog */}
             <Dialog
                 open={!!editingTagsPlaylistId}
                 onOpenChange={(open) => {
@@ -668,9 +470,7 @@ export default function YoutubePage() {
                 <DialogContent className="sm:max-w-sm">
                     <DialogHeader>
                         <DialogTitle>Tagları Düzenle</DialogTitle>
-                        <DialogDescription>
-                            Playlist&apos;e tag ekleyerek filtreleme yapabilirsin.
-                        </DialogDescription>
+                        <DialogDescription>Playlist&apos;e tag ekleyerek filtreleme yapabilirsin.</DialogDescription>
                     </DialogHeader>
                     <PlaylistTagEditor
                         tags={editingTags}
@@ -682,26 +482,20 @@ export default function YoutubePage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Loading */}
             {loading && (
                 <div className="flex items-center justify-center py-20">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
             )}
 
-            {/* Empty State */}
             {!loading && filteredPlaylists.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                     <div className="h-16 w-16 rounded-2xl bg-red-500/10 flex items-center justify-center mb-4">
                         <Youtube className="h-8 w-8 text-red-500" />
                     </div>
-                    <h3 className="text-lg font-semibold mb-2">
-                        {searchQuery ? "Sonuç bulunamadı" : "Henüz playlist yok"}
-                    </h3>
+                    <h3 className="text-lg font-semibold mb-2">{searchQuery ? "Sonuç bulunamadı" : "Henüz playlist yok"}</h3>
                     <p className="text-sm text-muted-foreground mb-6 max-w-sm">
-                        {searchQuery
-                            ? "Farklı bir arama terimi deneyin"
-                            : "YouTube playlist URL'si ekleyerek videoları takip etmeye başla"}
+                        {searchQuery ? "Farklı bir arama terimi deneyin" : "YouTube playlist URL'si ekleyerek videoları takip etmeye başla"}
                     </p>
                     {!searchQuery && (
                         <Button
@@ -715,11 +509,10 @@ export default function YoutubePage() {
                 </div>
             )}
 
-            {/* Playlist Grid */}
             {!loading && filteredPlaylists.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredPlaylists.map((playlist) => {
-                        const stats = videoStats[playlist.id] || { total: 0, watched: 0, durationSeconds: 0 };
+                        const stats = playlist.stats;
                         const progress = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0;
 
                         return (
@@ -728,9 +521,9 @@ export default function YoutubePage() {
                                 onClick={() => router.push(`/youtube/${playlist.id}`)}
                                 className="group relative cursor-pointer rounded-xl border border-border/50 bg-card overflow-hidden transition-all duration-200 hover:border-border hover:shadow-lg hover:shadow-red-500/5 hover:-translate-y-0.5"
                             >
-                                {/* Thumbnail */}
                                 <div className="relative aspect-video bg-muted overflow-hidden">
                                     {playlist.thumbnail_url ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
                                         <img
                                             src={playlist.thumbnail_url}
                                             alt={playlist.title}
@@ -741,7 +534,6 @@ export default function YoutubePage() {
                                             <Youtube className="h-12 w-12 text-red-500/40" />
                                         </div>
                                     )}
-                                    {/* Play overlay */}
                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                                         <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                                             <div className="h-12 w-12 rounded-full bg-red-500 flex items-center justify-center shadow-xl">
@@ -749,19 +541,16 @@ export default function YoutubePage() {
                                             </div>
                                         </div>
                                     </div>
-                                    {/* Hidden badge */}
                                     {playlist.is_shared === false && (
                                         <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-md flex items-center gap-1">
                                             <Lock className="h-3 w-3" />
                                             Gizli
                                         </div>
                                     )}
-                                    {/* Video count badge */}
                                     <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-md flex items-center gap-1">
                                         <ListVideo className="h-3 w-3" />
                                         {playlist.video_count} video
                                     </div>
-                                    {/* Progress bar at bottom of thumbnail */}
                                     {stats.total > 0 && (
                                         <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
                                             <div
@@ -772,12 +561,9 @@ export default function YoutubePage() {
                                     )}
                                 </div>
 
-                                {/* Info */}
                                 <div className="p-4">
                                     <div className="flex items-start justify-between gap-2 mb-2">
-                                        <h3 className="font-semibold line-clamp-2 text-sm leading-tight">
-                                            {playlist.title}
-                                        </h3>
+                                        <h3 className="font-semibold line-clamp-2 text-sm leading-tight">{playlist.title}</h3>
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                                                 <button className="p-1 rounded-md hover:bg-accent transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100">
@@ -791,7 +577,7 @@ export default function YoutubePage() {
                                                         window.open(
                                                             `https://www.youtube.com/playlist?list=${playlist.playlist_id}`,
                                                             "_blank",
-                                                            "noopener,noreferrer"
+                                                            "noopener,noreferrer",
                                                         );
                                                     }}
                                                 >
@@ -841,9 +627,7 @@ export default function YoutubePage() {
                                     </div>
 
                                     {playlist.channel_title && (
-                                        <p className="text-xs text-muted-foreground mb-2">
-                                            {playlist.channel_title}
-                                        </p>
+                                        <p className="text-xs text-muted-foreground mb-2">{playlist.channel_title}</p>
                                     )}
                                     {(playlist.tags ?? []).length > 0 && (
                                         <div className="flex flex-wrap gap-1 mb-2">
@@ -881,7 +665,6 @@ export default function YoutubePage() {
                                         </span>
                                     </div>
 
-                                    {/* Progress */}
                                     {stats.total > 0 && (
                                         <div className="mt-3">
                                             <div className="flex items-center justify-between text-xs mb-1.5">
@@ -892,10 +675,11 @@ export default function YoutubePage() {
                                             </div>
                                             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                                                 <div
-                                                    className={`h-full rounded-full transition-all duration-500 ${progress === 100
-                                                        ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
-                                                        : "bg-gradient-to-r from-red-500 to-rose-500"
-                                                        }`}
+                                                    className={`h-full rounded-full transition-all duration-500 ${
+                                                        progress === 100
+                                                            ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                                                            : "bg-gradient-to-r from-red-500 to-rose-500"
+                                                    }`}
                                                     style={{ width: `${progress}%` }}
                                                 />
                                             </div>
@@ -907,6 +691,17 @@ export default function YoutubePage() {
                     })}
                 </div>
             )}
+        </div>
+    );
+}
+
+function Step({ n, children }: { n: number; children: React.ReactNode }) {
+    return (
+        <div className="flex items-start gap-3">
+            <span className="flex-shrink-0 h-6 w-6 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold">
+                {n}
+            </span>
+            <div className="text-sm text-muted-foreground">{children}</div>
         </div>
     );
 }

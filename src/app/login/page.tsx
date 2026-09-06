@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import { signIn, signUp } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,44 +10,29 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { BookOpen, Loader2, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
+    const router = useRouter();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [message, setMessage] = useState<string | null>(null);
-
-    const supabase = createClient();
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
         setError(null);
-        setMessage(null);
 
         try {
-            if (isSignUp) {
-                const { error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        emailRedirectTo: `${window.location.origin}/auth/callback`,
-                    },
-                });
-                if (error) throw error;
-                setMessage("Kayıt başarılı! E-postanızı kontrol edin.");
-            } else {
-                const { error } = await supabase.auth.signInWithPassword({
-                    email,
-                    password,
-                });
-                if (error) throw error;
-                window.location.href = "/youtube";
+            const result = isSignUp ? await signUp(email, password) : await signIn(email, password);
+            if (result.error) {
+                setError(result.error);
+                return;
             }
+            router.push("/youtube");
+            router.refresh();
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : "Bir hata oluştu";
-            setError(errorMessage);
+            setError(err instanceof Error ? err.message : "Bir hata oluştu");
         } finally {
             setIsLoading(false);
         }
@@ -54,14 +40,12 @@ export default function LoginPage() {
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-background relative overflow-hidden">
-            {/* Background decoration */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute -top-[40%] -left-[20%] w-[70%] h-[70%] rounded-full bg-gradient-to-br from-violet-500/10 to-indigo-500/10 blur-3xl" />
                 <div className="absolute -bottom-[40%] -right-[20%] w-[70%] h-[70%] rounded-full bg-gradient-to-br from-cyan-500/10 to-blue-500/10 blur-3xl" />
             </div>
 
             <div className="relative z-10 w-full max-w-md px-4">
-                {/* Logo */}
                 <div className="flex flex-col items-center mb-8">
                     <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center mb-4 shadow-lg shadow-violet-500/25">
                         <BookOpen className="w-8 h-8 text-white" />
@@ -74,9 +58,7 @@ export default function LoginPage() {
 
                 <Card className="border-border/50 shadow-xl shadow-black/5 backdrop-blur-sm bg-card/80">
                     <CardHeader className="text-center pb-4">
-                        <CardTitle className="text-xl">
-                            {isSignUp ? "Hesap Oluştur" : "Hoş Geldin"}
-                        </CardTitle>
+                        <CardTitle className="text-xl">{isSignUp ? "Hesap Oluştur" : "Hoş Geldin"}</CardTitle>
                         <CardDescription>
                             {isSignUp
                                 ? "YouTube çalışma alanını oluşturmak için kayıt ol"
@@ -94,6 +76,7 @@ export default function LoginPage() {
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     required
+                                    autoComplete="email"
                                     className="h-11"
                                 />
                             </div>
@@ -109,6 +92,7 @@ export default function LoginPage() {
                                         onChange={(e) => setPassword(e.target.value)}
                                         required
                                         minLength={6}
+                                        autoComplete={isSignUp ? "new-password" : "current-password"}
                                         className="h-11 pr-10"
                                     />
                                     <button
@@ -116,11 +100,7 @@ export default function LoginPage() {
                                         onClick={() => setShowPassword(!showPassword)}
                                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                                     >
-                                        {showPassword ? (
-                                            <EyeOff className="w-4 h-4" />
-                                        ) : (
-                                            <Eye className="w-4 h-4" />
-                                        )}
+                                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                     </button>
                                 </div>
                             </div>
@@ -131,20 +111,12 @@ export default function LoginPage() {
                                 </div>
                             )}
 
-                            {message && (
-                                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-sm">
-                                    {message}
-                                </div>
-                            )}
-
                             <Button
                                 type="submit"
                                 className="w-full h-11 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-lg shadow-violet-500/25 transition-all duration-200"
                                 disabled={isLoading}
                             >
-                                {isLoading ? (
-                                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                ) : null}
+                                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                                 {isSignUp ? "Kayıt Ol" : "Giriş Yap"}
                             </Button>
                         </form>
@@ -155,13 +127,10 @@ export default function LoginPage() {
                                 onClick={() => {
                                     setIsSignUp(!isSignUp);
                                     setError(null);
-                                    setMessage(null);
                                 }}
                                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                             >
-                                {isSignUp
-                                    ? "Zaten hesabın var mı? Giriş yap"
-                                    : "Hesabın yok mu? Kayıt ol"}
+                                {isSignUp ? "Zaten hesabın var mı? Giriş yap" : "Hesabın yok mu? Kayıt ol"}
                             </button>
                         </div>
                     </CardContent>
