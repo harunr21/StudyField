@@ -7,6 +7,11 @@
   // next-themes inline script'indeki "__name is not defined" hatasini onler (OpenNext dokumani).
   "keep_names": false,
   "workers_dev": true,
+  // Ozel domain: ytlisteanalizi.com.tr zone'u bu hesapta aktif olduktan sonra deploy edin.
+  "routes": [
+    { "pattern": "ytlisteanalizi.com.tr", "custom_domain": true },
+    { "pattern": "www.ytlisteanalizi.com.tr", "custom_domain": true }
+  ],
   "observability": { "enabled": true },
   "assets": {
     "directory": ".open-next/assets",
