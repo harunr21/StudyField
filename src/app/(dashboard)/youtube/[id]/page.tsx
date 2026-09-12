@@ -93,22 +93,30 @@ export default function PlaylistDetailPage() {
     const [titleDraft, setTitleDraft] = useState("");
     const [movingId, setMovingId] = useState<string | null>(null);
 
+    const [loadError, setLoadError] = useState("");
+
     const loadData = useCallback(async () => {
-        const detail = await getPlaylistDetail(playlistId);
-        if (!detail || !detail.isOwner) {
-            router.push("/youtube");
+        try {
+            const detail = await getPlaylistDetail(playlistId);
+            if (!detail || !detail.isOwner) {
+                router.push("/youtube");
+                return false;
+            }
+            setPlaylist(detail.playlist);
+            setVideos(detail.videos);
+            setNoteCounts(detail.noteCounts);
+            setLoadError("");
+            return true;
+        } catch (err) {
+            setLoadError(err instanceof Error ? err.message : "Liste yüklenemedi.");
             return false;
         }
-        setPlaylist(detail.playlist);
-        setVideos(detail.videos);
-        setNoteCounts(detail.noteCounts);
-        return true;
     }, [playlistId, router]);
 
     useEffect(() => {
         let cancelled = false;
-        loadData().then((ok) => {
-            if (!cancelled && ok) setInitialLoading(false);
+        loadData().then(() => {
+            if (!cancelled) setInitialLoading(false);
         });
         return () => {
             cancelled = true;
@@ -323,7 +331,28 @@ export default function PlaylistDetailPage() {
         );
     }
 
-    if (!playlist) return null;
+    if (!playlist) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center px-6">
+                <AlertCircle className="h-10 w-10 text-destructive" />
+                <p className="font-medium">Liste yüklenemedi</p>
+                <p className="text-sm text-muted-foreground max-w-md">{loadError || "Beklenmeyen bir hata oluştu."}</p>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => router.push("/youtube")}>
+                        Playlistlere dön
+                    </Button>
+                    <Button
+                        onClick={() => {
+                            setInitialLoading(true);
+                            loadData().then(() => setInitialLoading(false));
+                        }}
+                    >
+                        Tekrar dene
+                    </Button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-5xl mx-auto p-6 md:p-10">

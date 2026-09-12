@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/context";
 import { newId, schema } from "@/db";
 import { requireUser } from "@/lib/auth/session";
@@ -12,6 +12,27 @@ import {
     fetchVideosInfoFromYoutube,
 } from "@/lib/youtube-server";
 import type { PlaylistWithStats, Profile, YoutubePlaylist, YoutubeVideo } from "@/lib/types";
+
+/**
+ * Liste gorunumlerinde video aciklamasi kullanilmaz; YouTube aciklamalari binlerce karakter
+ * olabildigi icin (339 video ~ 1 MB) tasimamak sayfayi belirgin hizlandirir.
+ */
+const videoListColumns = {
+    id: schema.youtubeVideos.id,
+    user_id: schema.youtubeVideos.user_id,
+    playlist_ref_id: schema.youtubeVideos.playlist_ref_id,
+    video_id: schema.youtubeVideos.video_id,
+    title: schema.youtubeVideos.title,
+    description: sql<string>`''`.as("description"),
+    thumbnail_url: schema.youtubeVideos.thumbnail_url,
+    channel_title: schema.youtubeVideos.channel_title,
+    duration: schema.youtubeVideos.duration,
+    position: schema.youtubeVideos.position,
+    is_watched: schema.youtubeVideos.is_watched,
+    watched_at: schema.youtubeVideos.watched_at,
+    created_at: schema.youtubeVideos.created_at,
+    updated_at: schema.youtubeVideos.updated_at,
+};
 
 export async function listMyPlaylists(): Promise<PlaylistWithStats[]> {
     const user = await requireUser();
@@ -123,19 +144,13 @@ export async function getPlaylistDetail(id: string): Promise<PlaylistDetail | nu
     if (!playlist) return null;
 
     const videos = await db
-        .select()
+        .select(videoListColumns)
         .from(schema.youtubeVideos)
         .where(eq(schema.youtubeVideos.playlist_ref_id, id))
         .orderBy(asc(schema.youtubeVideos.position));
 
     // Notlar her zaman ozeldir: sadece sahibi kendi not sayilarini gorur.
-    const noteCounts =
-        playlist.user_id === user.id
-            ? await loadNoteCounts(
-                  db,
-                  videos.map((v) => v.id),
-              )
-            : {};
+    const noteCounts = playlist.user_id === user.id ? await loadNoteCounts(db, id) : {};
 
     return { playlist, videos, noteCounts, isOwner: playlist.user_id === user.id };
 }
@@ -355,7 +370,7 @@ export async function getFriendPlaylistView(
     if (!playlist || playlist.user_id !== profile.user_id) return { profile, playlist: null, videos: [] };
 
     const videos = await db
-        .select()
+        .select(videoListColumns)
         .from(schema.youtubeVideos)
         .where(eq(schema.youtubeVideos.playlist_ref_id, playlistId))
         .orderBy(asc(schema.youtubeVideos.position));

@@ -104,6 +104,7 @@ export default function VideoWatchPage() {
     const [hasProfile, setHasProfile] = useState(false);
     const [screenshotStatus, setScreenshotStatus] = useState<"idle" | "capturing" | "success" | "error">("idle");
     const [screenshotMessage, setScreenshotMessage] = useState<string>("");
+    const [loadError, setLoadError] = useState("");
 
     const screenshotStreamRef = useRef<MediaStream | null>(null);
     const playerRef = useRef<YTPlayer | null>(null);
@@ -125,18 +126,24 @@ export default function VideoWatchPage() {
 
     useEffect(() => {
         let cancelled = false;
-        getWatchPageData(playlistId, videoDbId).then((data) => {
-            if (cancelled) return;
-            if (!data) {
-                router.push(`/youtube/${playlistId}`);
-                return;
-            }
-            setVideo(data.video);
-            setPlaylistVideos(data.playlistVideos);
-            setNotes(data.notes);
-            setHasProfile(Boolean(data.me));
-            setInitialLoading(false);
-        });
+        getWatchPageData(playlistId, videoDbId)
+            .then((data) => {
+                if (cancelled) return;
+                if (!data) {
+                    router.push(`/youtube/${playlistId}`);
+                    return;
+                }
+                setVideo(data.video);
+                setPlaylistVideos(data.playlistVideos);
+                setNotes(data.notes);
+                setHasProfile(Boolean(data.me));
+                setInitialLoading(false);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                setLoadError(err instanceof Error ? err.message : "Video yüklenemedi.");
+                setInitialLoading(false);
+            });
         return () => {
             cancelled = true;
         };
@@ -462,7 +469,17 @@ export default function VideoWatchPage() {
         );
     }
 
-    if (!video) return null;
+    if (!video) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-center px-6">
+                <p className="font-medium">Video yüklenemedi</p>
+                <p className="text-sm text-muted-foreground max-w-md">{loadError || "Beklenmeyen bir hata oluştu."}</p>
+                <Button variant="outline" onClick={() => router.push(`/youtube/${playlistId}`)}>
+                    Playlist&apos;e dön
+                </Button>
+            </div>
+        );
+    }
 
     return (
         <div className="h-[calc(100vh-3.5rem)] flex flex-col">

@@ -63,20 +63,27 @@ export async function getViewablePlaylist(
     return pl;
 }
 
+/** D1 sorgu basina en fazla 100 bagli parametre kabul eder; IN listeleri bu boyutta parcalanir. */
+const D1_MAX_PARAMS = 90;
+
 /** Birden fazla playlist icin toplam/izlenen/sure istatistikleri. */
 export async function loadPlaylistStats(db: Database, playlistIds: string[]): Promise<Record<string, PlaylistStats>> {
     const stats: Record<string, PlaylistStats> = {};
     for (const id of playlistIds) stats[id] = { total: 0, watched: 0, durationSeconds: 0 };
     if (playlistIds.length === 0) return stats;
 
-    const rows = await db
-        .select({
-            playlist_ref_id: schema.youtubeVideos.playlist_ref_id,
-            is_watched: schema.youtubeVideos.is_watched,
-            duration: schema.youtubeVideos.duration,
-        })
-        .from(schema.youtubeVideos)
-        .where(inArray(schema.youtubeVideos.playlist_ref_id, playlistIds));
+    const rows: Array<{ playlist_ref_id: string; is_watched: boolean; duration: string }> = [];
+    for (let i = 0; i < playlistIds.length; i += D1_MAX_PARAMS) {
+        const chunk = await db
+            .select({
+                playlist_ref_id: schema.youtubeVideos.playlist_ref_id,
+                is_watched: schema.youtubeVideos.is_watched,
+                duration: schema.youtubeVideos.duration,
+            })
+            .from(schema.youtubeVideos)
+            .where(inArray(schema.youtubeVideos.playlist_ref_id, playlistIds.slice(i, i + D1_MAX_PARAMS)));
+        rows.push(...chunk);
+    }
 
     for (const v of rows) {
         const s = stats[v.playlist_ref_id];
@@ -88,16 +95,16 @@ export async function loadPlaylistStats(db: Database, playlistIds: string[]): Pr
     return stats;
 }
 
-/** Video basina not sayisi. */
-export async function loadNoteCounts(db: Database, videoIds: string[]): Promise<Record<string, number>> {
-    if (videoIds.length === 0) return {};
+/** Bir playlist'teki videolar icin video basina not sayisi (tek JOIN sorgusu, parametre siniri yok). */
+export async function loadNoteCounts(db: Database, playlistId: string): Promise<Record<string, number>> {
     const rows = await db
         .select({
             video_ref_id: schema.youtubeVideoNotes.video_ref_id,
             count: sql<number>`count(*)`,
         })
         .from(schema.youtubeVideoNotes)
-        .where(inArray(schema.youtubeVideoNotes.video_ref_id, videoIds))
+        .innerJoin(schema.youtubeVideos, eq(schema.youtubeVideos.id, schema.youtubeVideoNotes.video_ref_id))
+        .where(eq(schema.youtubeVideos.playlist_ref_id, playlistId))
         .groupBy(schema.youtubeVideoNotes.video_ref_id);
     const out: Record<string, number> = {};
     for (const r of rows) out[r.video_ref_id] = Number(r.count);

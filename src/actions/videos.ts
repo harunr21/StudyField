@@ -59,7 +59,22 @@ export async function getWatchPageData(playlistId: string, videoDbId: string): P
     if (!video) return null;
 
     const playlistVideos = await db
-        .select()
+        .select({
+            id: schema.youtubeVideos.id,
+            user_id: schema.youtubeVideos.user_id,
+            playlist_ref_id: schema.youtubeVideos.playlist_ref_id,
+            video_id: schema.youtubeVideos.video_id,
+            title: schema.youtubeVideos.title,
+            description: sql<string>`''`.as("description"),
+            thumbnail_url: schema.youtubeVideos.thumbnail_url,
+            channel_title: schema.youtubeVideos.channel_title,
+            duration: schema.youtubeVideos.duration,
+            position: schema.youtubeVideos.position,
+            is_watched: schema.youtubeVideos.is_watched,
+            watched_at: schema.youtubeVideos.watched_at,
+            created_at: schema.youtubeVideos.created_at,
+            updated_at: schema.youtubeVideos.updated_at,
+        })
         .from(schema.youtubeVideos)
         .where(and(eq(schema.youtubeVideos.playlist_ref_id, playlistId), eq(schema.youtubeVideos.user_id, user.id)))
         .orderBy(asc(schema.youtubeVideos.position));
