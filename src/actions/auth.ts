@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/context";
 import { newId, schema } from "@/db";
 import { hashPassword, isLegacyBcryptHash, verifyPassword } from "@/lib/auth/password";
-import { endSession, getCurrentUser, startSession } from "@/lib/auth/session";
+import { endSession, getCurrentUser, requireUser, startSession } from "@/lib/auth/session";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -61,4 +61,28 @@ export async function signOut(): Promise<void> {
 
 export async function getSessionInfo(): Promise<{ id: string; email: string } | null> {
     return getCurrentUser();
+}
+
+/** Oturum acik kullanicinin sifresini degistirir; mevcut sifre dogrulanir, diger oturumlar kapatilir. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<AuthResult> {
+    const user = await requireUser();
+    if (newPassword.length < 6) return { error: "Yeni şifre en az 6 karakter olmalı." };
+    if (newPassword === currentPassword) return { error: "Yeni şifre mevcut şifreyle aynı olamaz." };
+
+    const db = getDb();
+    const row = await db.query.users.findFirst({ where: eq(schema.users.id, user.id) });
+    if (!row) return { error: "Kullanıcı bulunamadı." };
+
+    const ok = await verifyPassword(currentPassword, row.password_hash);
+    if (!ok) return { error: "Mevcut şifre hatalı." };
+
+    await db
+        .update(schema.users)
+        .set({ password_hash: await hashPassword(newPassword), updated_at: new Date().toISOString() })
+        .where(eq(schema.users.id, user.id));
+
+    // Diger cihazlardaki oturumlari kapat, bu oturumu yenile.
+    await db.delete(schema.sessions).where(eq(schema.sessions.user_id, user.id));
+    await startSession(user.id);
+    return {};
 }

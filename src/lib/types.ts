@@ -77,8 +77,3 @@ export interface PlaylistWithStats extends YoutubePlaylist {
 }
 
 export const USERNAME_REGEX = /^[a-z0-9_]{3,30}$/;
-
-export function deriveInitial(profile: Pick<Profile, "display_name" | "username">): string {
-    const source = profile.display_name?.trim() || profile.username;
-    return source.charAt(0).toUpperCase();
-}

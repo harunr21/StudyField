@@ -107,3 +107,77 @@ export interface YTSearchResult {
 export async function searchPlaylists(query: string, maxResults = 10): Promise<YTSearchResult[]> {
     return callYoutubeApi<YTSearchResult[]>("search", { q: query, maxResults: String(maxResults) });
 }
+
+const VIDEO_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+
+/**
+ * Serbest metinden YouTube video id'lerini cikarir.
+ * Linklerin etrafinda parantez, koseli parantez, tirnak veya markdown sozdizimi olabilir:
+ *   (https://youtu.be/ID)   [[https://youtu.be/ID]](https://youtu.be/ID)   [baslik](https://youtu.be/ID)
+ * Desteklenen bicimler: watch?v=, youtu.be/, /shorts/, /live/, /embed/ ve ciplak 11 karakterlik id.
+ * Sira korunur, tekrarlar ayiklanir. Link gibi gorunmeyen duz kelimeler sessizce atlanir.
+ */
+export function extractVideoIds(input: string): { ids: string[]; invalid: string[] } {
+    const ids: string[] = [];
+    const invalid: string[] = [];
+    const seen = new Set<string>();
+
+    // Parantez, koseli parantez, sivri parantez, tirnak, virgul ve bosluklar ayirici sayilir;
+    // YouTube URL'lerinde bu karakterler bulunmaz.
+    const tokens = input
+        .split(/[\s,;()[\]{}<>"'`]+/)
+        .map((t) => t.trim().replace(/^[.:!?]+|[.:!?]+$/g, ""))
+        .filter(Boolean);
+
+    for (const token of tokens) {
+        const id = parseVideoId(token);
+        if (id) {
+            if (seen.has(id)) continue;
+            seen.add(id);
+            ids.push(id);
+            continue;
+        }
+        // Sadece URL'ye benzeyen ya da id uzunlugunda olan girdileri "gecersiz" say;
+        // markdown baslik kelimeleri gibi duz metni gurultu olarak yoksay.
+        if (/[./]/.test(token) || token.length === 11) {
+            invalid.push(token);
+        }
+    }
+
+    return { ids, invalid };
+}
+
+function parseVideoId(token: string): string | null {
+    if (VIDEO_ID_REGEX.test(token)) return token;
+
+    let url: URL;
+    try {
+        url = new URL(token.startsWith("http") ? token : `https://${token}`);
+    } catch {
+        return null;
+    }
+
+    const host = url.hostname.replace(/^www\.|^m\./, "");
+    if (!["youtube.com", "youtu.be", "youtube-nocookie.com", "music.youtube.com"].includes(host)) {
+        return null;
+    }
+
+    const fromQuery = url.searchParams.get("v");
+    if (fromQuery && VIDEO_ID_REGEX.test(fromQuery)) return fromQuery;
+
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (host === "youtu.be" && segments[0] && VIDEO_ID_REGEX.test(segments[0])) return segments[0];
+
+    const idx = segments.findIndex((s) => ["shorts", "live", "embed", "v"].includes(s));
+    if (idx !== -1 && segments[idx + 1] && VIDEO_ID_REGEX.test(segments[idx + 1])) return segments[idx + 1];
+
+    return null;
+}
+
+/**
+ * Kullanicinin kendi yonettigi listeler: YouTube'a bagli olmadiklari icin senkron edilmez,
+ * video eklenebilir ve siralanabilir. (custom_, sub_, copy_ onekleri)
+ */
+export function isUserManagedPlaylistId(playlistId: string): boolean {
+    return playlistId.startsWith("custom_") || playlistId.startsWith("sub_") || playlistId.startsWith("copy_");
+}

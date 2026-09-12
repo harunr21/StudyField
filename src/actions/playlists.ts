@@ -5,8 +5,12 @@ import { getDb } from "@/db/context";
 import { newId, schema } from "@/db";
 import { requireUser } from "@/lib/auth/session";
 import { getViewablePlaylist, insertVideoRows, loadNoteCounts, loadPlaylistStats } from "@/lib/data/access";
-import { extractPlaylistId } from "@/lib/youtube";
-import { fetchPlaylistInfoFromYoutube, fetchPlaylistVideosFromYoutube } from "@/lib/youtube-server";
+import { extractPlaylistId, extractVideoIds, isUserManagedPlaylistId } from "@/lib/youtube";
+import {
+    fetchPlaylistInfoFromYoutube,
+    fetchPlaylistVideosFromYoutube,
+    fetchVideosInfoFromYoutube,
+} from "@/lib/youtube-server";
 import type { PlaylistWithStats, Profile, YoutubePlaylist, YoutubeVideo } from "@/lib/types";
 
 export async function listMyPlaylists(): Promise<PlaylistWithStats[]> {
@@ -144,8 +148,8 @@ export async function syncPlaylist(id: string): Promise<{ added?: number; remove
         where: and(eq(schema.youtubePlaylists.id, id), eq(schema.youtubePlaylists.user_id, user.id)),
     });
     if (!playlist) return { error: "Playlist bulunamadı." };
-    if (playlist.playlist_id.startsWith("sub_") || playlist.playlist_id.startsWith("copy_")) {
-        return { error: "Alt playlistler ve kopyalar YouTube ile senkronize edilemez." };
+    if (isUserManagedPlaylistId(playlist.playlist_id)) {
+        return { error: "Kendi oluşturduğun listeler, alt playlistler ve kopyalar YouTube ile senkronize edilemez." };
     }
 
     try {
@@ -356,4 +360,196 @@ export async function getFriendPlaylistView(
         .where(eq(schema.youtubeVideos.playlist_ref_id, playlistId))
         .orderBy(asc(schema.youtubeVideos.position));
     return { profile, playlist, videos };
+}
+
+// =============================================
+// Kullanicinin kendi olusturdugu listeler
+// =============================================
+
+// YouTube 50'lik gruplarla cekilir (1000 video = 20 alt istek; ucretsiz plan siniri 50),
+// D1'e 500'luk batch'lerle yazilir. Daha yukarisi ucretsiz planda alt istek sinirina yaklasir.
+const MAX_VIDEOS_PER_REQUEST = 1000;
+
+export interface AddVideosSummary {
+    added: number;
+    duplicates: number;
+    invalid: number;
+    notFound: number;
+}
+
+/** Verilen linkleri cozer, YouTube'dan bilgilerini ceker ve listeye ekler; listede olanlari atlar. */
+async function appendVideosToPlaylist(
+    userId: string,
+    playlistId: string,
+    linksText: string,
+): Promise<AddVideosSummary & { error?: string }> {
+    const db = getDb();
+    const { ids, invalid } = extractVideoIds(linksText);
+    const summary: AddVideosSummary = { added: 0, duplicates: 0, invalid: invalid.length, notFound: 0 };
+    if (ids.length === 0) return summary;
+    if (ids.length > MAX_VIDEOS_PER_REQUEST) {
+        return { ...summary, error: `Tek seferde en fazla ${MAX_VIDEOS_PER_REQUEST} video eklenebilir.` };
+    }
+
+    const existing = await db
+        .select({ video_id: schema.youtubeVideos.video_id, position: schema.youtubeVideos.position })
+        .from(schema.youtubeVideos)
+        .where(eq(schema.youtubeVideos.playlist_ref_id, playlistId));
+    const existingIds = new Set(existing.map((e) => e.video_id));
+    let nextPosition = existing.reduce((max, e) => Math.max(max, e.position), -1) + 1;
+
+    const fresh = ids.filter((id) => !existingIds.has(id));
+    summary.duplicates = ids.length - fresh.length;
+    if (fresh.length === 0) return summary;
+
+    const details = await fetchVideosInfoFromYoutube(fresh);
+    const rows: Array<typeof schema.youtubeVideos.$inferInsert> = [];
+    for (const id of fresh) {
+        const info = details.get(id);
+        if (!info) {
+            summary.notFound++;
+            continue;
+        }
+        rows.push({
+            id: newId(),
+            user_id: userId,
+            playlist_ref_id: playlistId,
+            video_id: id,
+            title: info.title,
+            description: info.description,
+            thumbnail_url: info.thumbnailUrl,
+            channel_title: info.channelTitle,
+            duration: info.durationFormatted,
+            position: nextPosition++,
+        });
+    }
+
+    await insertVideoRows(db, rows);
+    summary.added = rows.length;
+
+    const first = rows[0];
+    await db
+        .update(schema.youtubePlaylists)
+        .set({
+            video_count: existing.length + rows.length,
+            updated_at: new Date().toISOString(),
+            // Kapak resmi yoksa ilk eklenen videonunki kullanilir.
+            ...(existing.length === 0 && first ? { thumbnail_url: first.thumbnail_url ?? "" } : {}),
+        })
+        .where(eq(schema.youtubePlaylists.id, playlistId));
+
+    return summary;
+}
+
+/** Bir veya birden fazla video linkinden yeni bir liste olusturur. Bos liste de olusturulabilir. */
+export async function createCustomPlaylist(
+    nameInput: string,
+    linksText: string,
+): Promise<{ id?: string; summary?: AddVideosSummary; error?: string }> {
+    const user = await requireUser();
+    const title = nameInput.trim().slice(0, 150);
+    if (!title) return { error: "Listeye bir ad verin." };
+
+    const db = getDb();
+    const id = newId();
+    await db.insert(schema.youtubePlaylists).values({
+        id,
+        user_id: user.id,
+        playlist_id: `custom_${Date.now()}_${id.slice(0, 8)}`,
+        title,
+        description: "",
+        thumbnail_url: "",
+        channel_title: "",
+        video_count: 0,
+        tags: [],
+    });
+
+    try {
+        const summary = await appendVideosToPlaylist(user.id, id, linksText);
+        if (summary.error) {
+            await db.delete(schema.youtubePlaylists).where(eq(schema.youtubePlaylists.id, id));
+            return { error: summary.error };
+        }
+        return { id, summary };
+    } catch (err) {
+        await db.delete(schema.youtubePlaylists).where(eq(schema.youtubePlaylists.id, id));
+        return { error: err instanceof Error ? err.message : "Bir hata oluştu." };
+    }
+}
+
+/** Kullanicinin kendi yonettigi bir listeye video ekler. */
+export async function addVideosToPlaylist(
+    playlistId: string,
+    linksText: string,
+): Promise<{ summary?: AddVideosSummary; error?: string }> {
+    const user = await requireUser();
+    const db = getDb();
+    const playlist = await db.query.youtubePlaylists.findFirst({
+        where: and(eq(schema.youtubePlaylists.id, playlistId), eq(schema.youtubePlaylists.user_id, user.id)),
+    });
+    if (!playlist) return { error: "Playlist bulunamadı." };
+    if (!isUserManagedPlaylistId(playlist.playlist_id)) {
+        return { error: "YouTube'dan içe aktarılan listelere video eklenemez; 'Yenile' bunları geri silerdi." };
+    }
+
+    try {
+        const summary = await appendVideosToPlaylist(user.id, playlistId, linksText);
+        if (summary.error) return { error: summary.error };
+        return { summary };
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : "Bir hata oluştu." };
+    }
+}
+
+/** Videoyu listede bir ust ya da bir alt siraya tasir (komsusuyla yer degistirir). */
+export async function moveVideo(
+    playlistId: string,
+    videoDbId: string,
+    direction: "up" | "down",
+): Promise<{ error?: string }> {
+    const user = await requireUser();
+    const db = getDb();
+    const playlist = await db.query.youtubePlaylists.findFirst({
+        where: and(eq(schema.youtubePlaylists.id, playlistId), eq(schema.youtubePlaylists.user_id, user.id)),
+    });
+    if (!playlist) return { error: "Playlist bulunamadı." };
+    if (!isUserManagedPlaylistId(playlist.playlist_id)) {
+        return { error: "YouTube'dan içe aktarılan listelerde sıra değiştirilemez." };
+    }
+
+    const videos = await db
+        .select({ id: schema.youtubeVideos.id, position: schema.youtubeVideos.position })
+        .from(schema.youtubeVideos)
+        .where(eq(schema.youtubeVideos.playlist_ref_id, playlistId))
+        .orderBy(asc(schema.youtubeVideos.position));
+
+    const idx = videos.findIndex((v) => v.id === videoDbId);
+    if (idx === -1) return { error: "Video bulunamadı." };
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= videos.length) return {};
+
+    const a = videos[idx];
+    const b = videos[swapIdx];
+    // Pozisyonlar esitse (eski veri) siralama indekslerini kullanarak aralarini ac.
+    const samePos = a.position === b.position;
+    const posA = samePos ? swapIdx : b.position;
+    const posB = samePos ? idx : a.position;
+    const now = new Date().toISOString();
+    await db.batch([
+        db.update(schema.youtubeVideos).set({ position: posA, updated_at: now }).where(eq(schema.youtubeVideos.id, a.id)),
+        db.update(schema.youtubeVideos).set({ position: posB, updated_at: now }).where(eq(schema.youtubeVideos.id, b.id)),
+    ]);
+    return {};
+}
+
+export async function renamePlaylist(playlistId: string, titleInput: string): Promise<{ error?: string }> {
+    const user = await requireUser();
+    const title = titleInput.trim().slice(0, 150);
+    if (!title) return { error: "Ad boş olamaz." };
+    const db = getDb();
+    await db
+        .update(schema.youtubePlaylists)
+        .set({ title, updated_at: new Date().toISOString() })
+        .where(and(eq(schema.youtubePlaylists.id, playlistId), eq(schema.youtubePlaylists.user_id, user.id)));
+    return {};
 }

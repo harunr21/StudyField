@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/context";
 import { newId, schema } from "@/db";
 import { requireUser } from "@/lib/auth/session";
@@ -21,9 +21,22 @@ export async function setVideoWatched(videoId: string, watched: boolean): Promis
 export async function deleteVideo(videoId: string): Promise<{ error?: string }> {
     const user = await requireUser();
     const db = getDb();
+    const video = await db.query.youtubeVideos.findFirst({
+        where: and(eq(schema.youtubeVideos.id, videoId), eq(schema.youtubeVideos.user_id, user.id)),
+    });
+    if (!video) return {};
+
+    await db.delete(schema.youtubeVideos).where(eq(schema.youtubeVideos.id, videoId));
+
+    // Kart uzerindeki video sayisini guncel tut.
+    const [{ count }] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.youtubeVideos)
+        .where(eq(schema.youtubeVideos.playlist_ref_id, video.playlist_ref_id));
     await db
-        .delete(schema.youtubeVideos)
-        .where(and(eq(schema.youtubeVideos.id, videoId), eq(schema.youtubeVideos.user_id, user.id)));
+        .update(schema.youtubePlaylists)
+        .set({ video_count: Number(count), updated_at: new Date().toISOString() })
+        .where(eq(schema.youtubePlaylists.id, video.playlist_ref_id));
     return {};
 }
 

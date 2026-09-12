@@ -1,11 +1,11 @@
 {
   "name": "YouTube Workspace",
   "short_name": "YouTube Workspace",
-  "description": "Kişisel Çalışma Alanı — YouTube, seanslar ve istatistikler",
+  "description": "YouTube playlist takibi, izleme ilerlemesi ve zaman damgalı notlar.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
-  "theme_color": "#7c3aed",
+  "theme_color": "#ef4444",
   "orientation": "any",
   "icons": [
     {

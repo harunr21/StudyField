@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
     addPlaylist as addPlaylistAction,
+    createCustomPlaylist,
     deletePlaylist as deletePlaylistAction,
     listMyPlaylists,
     setPlaylistShared,
@@ -47,8 +48,10 @@ import {
     EyeOff,
     Lock,
     Tag,
+    ListPlus,
 } from "lucide-react";
 import { PlaylistTagEditor } from "@/components/playlist-tag-editor";
+import { VideoLinkInput } from "@/components/video-link-input";
 
 function formatDate(dateString: string) {
     const date = new Date(dateString);
@@ -68,7 +71,11 @@ export default function YoutubePage() {
     const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
     const [editingTagsPlaylistId, setEditingTagsPlaylistId] = useState<string | null>(null);
     const [editingTags, setEditingTags] = useState<string[]>([]);
-    const [dialogTab, setDialogTab] = useState<"url" | "search">("url");
+    const [dialogTab, setDialogTab] = useState<"url" | "search" | "custom">("url");
+    const [customName, setCustomName] = useState("");
+    const [customLinks, setCustomLinks] = useState("");
+    const [creatingCustom, setCreatingCustom] = useState(false);
+    const [customError, setCustomError] = useState("");
     const [searchTerm, setSearchTerm] = useState("");
     const [searchResults, setSearchResults] = useState<YTSearchResult[]>([]);
     const [searching, setSearching] = useState(false);
@@ -150,6 +157,26 @@ export default function YoutubePage() {
         setDialogOpen(false);
         setAdding(false);
         setAddProgress("");
+        router.push(`/youtube/${result.id}`);
+    };
+
+    const createCustom = async () => {
+        setCustomError("");
+        if (!customName.trim()) {
+            setCustomError("Listeye bir ad verin.");
+            return;
+        }
+        setCreatingCustom(true);
+        const result = await createCustomPlaylist(customName, customLinks);
+        if (result.error || !result.id) {
+            setCustomError(result.error ?? "Bir hata oluştu.");
+            setCreatingCustom(false);
+            return;
+        }
+        setCustomName("");
+        setCustomLinks("");
+        setDialogOpen(false);
+        setCreatingCustom(false);
         router.push(`/youtube/${result.id}`);
     };
 
@@ -262,6 +289,7 @@ export default function YoutubePage() {
                             setDialogTab("url");
                             setSearchTerm("");
                             setSearchResults([]);
+                            setCustomError("");
                         }
                     }}
                 >
@@ -277,7 +305,7 @@ export default function YoutubePage() {
                         </DialogHeader>
 
                         <div className="flex gap-1 rounded-lg border border-border/50 bg-muted/50 p-1">
-                            {(["url", "search"] as const).map((tab) => (
+                            {(["url", "search", "custom"] as const).map((tab) => (
                                 <button
                                     key={tab}
                                     onClick={() => setDialogTab(tab)}
@@ -287,7 +315,7 @@ export default function YoutubePage() {
                                             : "text-muted-foreground hover:text-foreground"
                                     }`}
                                 >
-                                    {tab === "url" ? "URL ile Ekle" : "YouTube'da Ara"}
+                                    {tab === "url" ? "URL ile Ekle" : tab === "search" ? "YouTube'da Ara" : "Videolardan Oluştur"}
                                 </button>
                             ))}
                         </div>
@@ -420,6 +448,50 @@ export default function YoutubePage() {
                                 {!searching && searchTerm.length >= 2 && searchResults.length === 0 && (
                                     <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı.</p>
                                 )}
+                            </div>
+                        )}
+
+                        {dialogTab === "custom" && (
+                            <div className="space-y-4">
+                                <DialogDescription>
+                                    Tek tek video linklerinden kendi listeni oluştur. Sonradan da video ekleyebilirsin.
+                                </DialogDescription>
+                                <Input
+                                    placeholder="Liste adı (örn. Lineer Cebir tekrar)"
+                                    value={customName}
+                                    onChange={(e) => {
+                                        setCustomName(e.target.value);
+                                        setCustomError("");
+                                    }}
+                                    disabled={creatingCustom}
+                                    maxLength={150}
+                                    className="h-11"
+                                    autoFocus
+                                />
+                                <VideoLinkInput value={customLinks} onChange={setCustomLinks} disabled={creatingCustom} />
+                                {customError && (
+                                    <div className="flex items-start gap-2 text-sm text-destructive">
+                                        <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                        <span>{customError}</span>
+                                    </div>
+                                )}
+                                <Button
+                                    onClick={createCustom}
+                                    disabled={creatingCustom || !customName.trim()}
+                                    className="w-full bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white"
+                                >
+                                    {creatingCustom ? (
+                                        <>
+                                            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                            Oluşturuluyor...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ListPlus className="mr-1.5 h-4 w-4" />
+                                            Listeyi Oluştur
+                                        </>
+                                    )}
+                                </Button>
                             </div>
                         )}
                     </DialogContent>

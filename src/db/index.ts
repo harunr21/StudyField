@@ -7,10 +7,6 @@ export function createDb(d1: D1Database): Database {
     return drizzle(d1, { schema });
 }
 
-export function nowIso(): string {
-    return new Date().toISOString();
-}
-
 export function newId(): string {
     return crypto.randomUUID();
 }

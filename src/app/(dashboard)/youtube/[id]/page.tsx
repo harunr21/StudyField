@@ -2,14 +2,19 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
+    addVideosToPlaylist,
     createSubPlaylist as createSubPlaylistAction,
     getPlaylistDetail,
+    moveVideo,
+    renamePlaylist,
     setPlaylistShared,
     syncPlaylist,
 } from "@/actions/playlists";
 import { deleteVideo as deleteVideoAction, setVideoWatched } from "@/actions/videos";
 import type { YoutubePlaylist, YoutubeVideo } from "@/lib/types";
 import { formatClockValue, parseDurationToSeconds } from "@/lib/time";
+import { isUserManagedPlaylistId } from "@/lib/youtube";
+import { VideoLinkInput } from "@/components/video-link-input";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +48,10 @@ import {
     AlertCircle,
     Lock,
     Globe,
+    ListPlus,
+    Pencil,
+    ChevronUp,
+    ChevronDown,
 } from "lucide-react";
 import {
     DropdownMenu,
@@ -73,6 +82,16 @@ export default function PlaylistDetailPage() {
     const [creatingSubPlaylist, setCreatingSubPlaylist] = useState(false);
     const [subPlaylistError, setSubPlaylistError] = useState("");
     const [subPlaylistSuccess, setSubPlaylistSuccess] = useState("");
+
+    // Kendi liste: video ekleme, ad duzenleme, siralama
+    const [addDialogOpen, setAddDialogOpen] = useState(false);
+    const [addLinks, setAddLinks] = useState("");
+    const [addingVideos, setAddingVideos] = useState(false);
+    const [addError, setAddError] = useState("");
+    const [addSummary, setAddSummary] = useState("");
+    const [editingTitle, setEditingTitle] = useState(false);
+    const [titleDraft, setTitleDraft] = useState("");
+    const [movingId, setMovingId] = useState<string | null>(null);
 
     const loadData = useCallback(async () => {
         const detail = await getPlaylistDetail(playlistId);
@@ -135,6 +154,58 @@ export default function PlaylistDetailPage() {
         setVideos((prev) => prev.filter((v) => v.id !== id));
         await deleteVideoAction(id);
     }, []);
+
+    const isUserManaged = playlist ? isUserManagedPlaylistId(playlist.playlist_id) : false;
+    const canReorder = isUserManaged && filter === "all" && searchQuery.trim() === "";
+
+    const submitAddVideos = async () => {
+        if (!playlist) return;
+        setAddError("");
+        setAddSummary("");
+        setAddingVideos(true);
+        const res = await addVideosToPlaylist(playlist.id, addLinks);
+        if (res.error || !res.summary) {
+            setAddError(res.error ?? "Bir hata oluştu.");
+            setAddingVideos(false);
+            return;
+        }
+        const s = res.summary;
+        const parts = [`${s.added} video eklendi`];
+        if (s.duplicates > 0) parts.push(`${s.duplicates} zaten listedeydi`);
+        if (s.notFound > 0) parts.push(`${s.notFound} bulunamadı`);
+        if (s.invalid > 0) parts.push(`${s.invalid} geçersiz link atlandı`);
+        setAddSummary(parts.join(", ") + ".");
+        setAddLinks("");
+        setAddingVideos(false);
+        await loadData();
+    };
+
+    const saveTitle = async () => {
+        if (!playlist) return;
+        const next = titleDraft.trim();
+        setEditingTitle(false);
+        if (!next || next === playlist.title) return;
+        const prev = playlist.title;
+        setPlaylist({ ...playlist, title: next });
+        const res = await renamePlaylist(playlist.id, next);
+        if (res.error) setPlaylist((p) => (p ? { ...p, title: prev } : p));
+    };
+
+    const move = async (video: YoutubeVideo, direction: "up" | "down") => {
+        if (!playlist || movingId) return;
+        const idx = videos.findIndex((v) => v.id === video.id);
+        const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+        if (swapIdx < 0 || swapIdx >= videos.length) return;
+        setMovingId(video.id);
+        setVideos((prev) => {
+            const next = [...prev];
+            [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+            return next;
+        });
+        const res = await moveVideo(playlist.id, video.id, direction);
+        if (res.error) await loadData();
+        setMovingId(null);
+    };
 
     const toggleShared = async () => {
         if (!playlist) return;
@@ -276,7 +347,37 @@ export default function PlaylistDetailPage() {
 
                     <div className="flex-1 min-w-0">
                         <div className="flex items-start gap-3 mb-2">
-                            <h1 className="text-2xl md:text-3xl font-bold tracking-tight line-clamp-2 flex-1">{playlist.title}</h1>
+                            {editingTitle ? (
+                                <Input
+                                    value={titleDraft}
+                                    onChange={(e) => setTitleDraft(e.target.value)}
+                                    onBlur={saveTitle}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveTitle();
+                                        if (e.key === "Escape") setEditingTitle(false);
+                                    }}
+                                    maxLength={150}
+                                    autoFocus
+                                    className="flex-1 h-11 text-xl md:text-2xl font-bold"
+                                />
+                            ) : (
+                                <h1 className="text-2xl md:text-3xl font-bold tracking-tight line-clamp-2 flex-1">
+                                    {playlist.title}
+                                    {isUserManaged && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setTitleDraft(playlist.title);
+                                                setEditingTitle(true);
+                                            }}
+                                            className="ml-2 inline-flex align-middle p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                            title="Adı düzenle"
+                                        >
+                                            <Pencil className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </h1>
+                            )}
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -360,10 +461,71 @@ export default function PlaylistDetailPage() {
                         ))}
                     </div>
 
-                    <Button size="sm" variant="outline" onClick={syncVideos} disabled={syncing} className="gap-1.5">
-                        <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-                        Yenile
-                    </Button>
+                    {isUserManaged ? (
+                        <Dialog
+                            open={addDialogOpen}
+                            onOpenChange={(open) => {
+                                setAddDialogOpen(open);
+                                if (!open) {
+                                    setAddError("");
+                                    setAddSummary("");
+                                }
+                            }}
+                        >
+                            <DialogTrigger asChild>
+                                <Button
+                                    size="sm"
+                                    className="gap-1.5 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white"
+                                >
+                                    <ListPlus className="h-4 w-4" />
+                                    Video Ekle
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-lg">
+                                <DialogHeader>
+                                    <DialogTitle>Listeye Video Ekle</DialogTitle>
+                                    <DialogDescription>
+                                        Linkleri yapıştır; videolar listenin sonuna eklenir, zaten olanlar atlanır.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <VideoLinkInput value={addLinks} onChange={setAddLinks} disabled={addingVideos} autoFocus />
+                                {addError && (
+                                    <div className="flex items-start gap-2 text-sm text-destructive">
+                                        <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                        <span>{addError}</span>
+                                    </div>
+                                )}
+                                {addSummary && (
+                                    <div className="flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/10 rounded-lg px-3 py-2">
+                                        <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                        <span>{addSummary}</span>
+                                    </div>
+                                )}
+                                <Button
+                                    onClick={submitAddVideos}
+                                    disabled={addingVideos || !addLinks.trim()}
+                                    className="w-full bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white"
+                                >
+                                    {addingVideos ? (
+                                        <>
+                                            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                            Ekleniyor...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ListPlus className="mr-1.5 h-4 w-4" />
+                                            Ekle
+                                        </>
+                                    )}
+                                </Button>
+                            </DialogContent>
+                        </Dialog>
+                    ) : (
+                        <Button size="sm" variant="outline" onClick={syncVideos} disabled={syncing} className="gap-1.5">
+                            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                            Yenile
+                        </Button>
+                    )}
 
                     <Dialog
                         open={titleDialogOpen}
@@ -597,7 +759,11 @@ export default function PlaylistDetailPage() {
                         {searchQuery || filter !== "all" ? "Video bulunamadı" : "Henüz video yok"}
                     </h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                        {searchQuery || filter !== "all" ? "Filtreleri değiştirmeyi deneyin" : "Videoları çekmek için 'Yenile' butonuna tıklayın"}
+                        {searchQuery || filter !== "all"
+                            ? "Filtreleri değiştirmeyi deneyin"
+                            : isUserManaged
+                              ? "'Video Ekle' ile YouTube linklerini yapıştırarak başla"
+                              : "Videoları çekmek için 'Yenile' butonuna tıklayın"}
                     </p>
                 </div>
             )}
@@ -625,6 +791,29 @@ export default function PlaylistDetailPage() {
                         </button>
 
                         <span className="text-xs text-muted-foreground w-6 text-center flex-shrink-0 font-mono">{index + 1}</span>
+
+                        {canReorder && (
+                            <div className="flex flex-col flex-shrink-0 -my-1">
+                                <button
+                                    type="button"
+                                    onClick={() => move(video, "up")}
+                                    disabled={index === 0 || movingId !== null}
+                                    className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                    title="Yukarı taşı"
+                                >
+                                    <ChevronUp className="h-4 w-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => move(video, "down")}
+                                    disabled={index === filteredVideos.length - 1 || movingId !== null}
+                                    className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                    title="Aşağı taşı"
+                                >
+                                    <ChevronDown className="h-4 w-4" />
+                                </button>
+                            </div>
+                        )}
 
                         <div
                             className="flex-shrink-0 w-32 aspect-video rounded-lg overflow-hidden bg-muted cursor-pointer relative group/thumb"

@@ -1,6 +1,15 @@
 # StudyField (YouTube Workspace)
 
-YouTube playlist'lerini takip et, videoları izlendi olarak işaretle, zaman damgalı not al, tldraw tahtasında çiz ve arkadaşlarınla ilerlemeni paylaş. Tamamen Cloudflare üzerinde çalışır.
+YouTube playlist'lerini takip et, tek tek video linklerinden kendi listelerini oluştur, videoları izlendi olarak işaretle, zaman damgalı not al, tldraw tahtasında çiz ve arkadaşlarınla ilerlemeni paylaş. Tamamen Cloudflare üzerinde çalışır.
+
+## Özellikler
+
+- **YouTube playlist içe aktarma:** URL ile veya YouTube'da arayarak. "Yenile" ile YouTube'daki değişiklikler çekilir, izleme durumu korunur.
+- **Kendi listeni oluştur:** Bir veya birden fazla video linki yapıştırarak (watch, youtu.be, shorts, live). Sonradan video eklenebilir, sıralanabilir, adı değiştirilebilir. Alt playlist ve kopyalar da aynı şekilde yönetilir.
+- **İzleme takibi:** İzlendi işaretleme, ilerleme yüzdesi, toplam ve kalan süre.
+- **Zaman damgalı notlar:** Video izlerken ana bağlı not alma, nota tıklayınca o saniyeye gitme.
+- **Arkadaşlar ve Study Rooms:** Kullanıcı adıyla arkadaş ekleme, paylaşılan listeleri görme ve kopyalama, aynı anda izleyen arkadaşları canlı görme.
+- **Çizim tahtası:** tldraw, tarayıcıda yerel kayıt.
 
 ## Mimari
 

@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { getMyProfile, saveMyProfile } from "@/actions/profile";
+import { changePassword } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { USERNAME_REGEX, type Profile } from "@/lib/types";
-import { AlertCircle, CheckCircle2, Loader2, UserRound } from "lucide-react";
+import { AlertCircle, CheckCircle2, KeyRound, Loader2, UserRound } from "lucide-react";
 import Link from "next/link";
 
 export default function ProfilePage() {
@@ -18,6 +19,38 @@ export default function ProfilePage() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
+
+    // Sifre degistirme
+    const [currentPassword, setCurrentPassword] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [newPasswordAgain, setNewPasswordAgain] = useState("");
+    const [changingPassword, setChangingPassword] = useState(false);
+    const [passwordError, setPasswordError] = useState("");
+    const [passwordSuccess, setPasswordSuccess] = useState("");
+
+    const submitPasswordChange = async () => {
+        setPasswordError("");
+        setPasswordSuccess("");
+        if (newPassword.length < 6) {
+            setPasswordError("Yeni şifre en az 6 karakter olmalı.");
+            return;
+        }
+        if (newPassword !== newPasswordAgain) {
+            setPasswordError("Yeni şifreler birbiriyle eşleşmiyor.");
+            return;
+        }
+        setChangingPassword(true);
+        const res = await changePassword(currentPassword, newPassword);
+        if (res.error) {
+            setPasswordError(res.error);
+        } else {
+            setPasswordSuccess("Şifren güncellendi. Diğer cihazlardaki oturumlar kapatıldı.");
+            setCurrentPassword("");
+            setNewPassword("");
+            setNewPasswordAgain("");
+        }
+        setChangingPassword(false);
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -164,6 +197,91 @@ export default function ProfilePage() {
                             "Değişiklikleri kaydet"
                         ) : (
                             "Profili oluştur"
+                        )}
+                    </Button>
+                </div>
+            </div>
+
+            <div className="rounded-xl border border-border/50 bg-card p-6 space-y-5 mt-6">
+                <div className="flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-violet-400" />
+                    <h2 className="font-semibold">Şifre değiştir</h2>
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="current-password">Mevcut şifre</Label>
+                    <Input
+                        id="current-password"
+                        type="password"
+                        value={currentPassword}
+                        onChange={(e) => {
+                            setCurrentPassword(e.target.value);
+                            setPasswordError("");
+                            setPasswordSuccess("");
+                        }}
+                        autoComplete="current-password"
+                        className="h-11"
+                    />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                        <Label htmlFor="new-password">Yeni şifre</Label>
+                        <Input
+                            id="new-password"
+                            type="password"
+                            value={newPassword}
+                            onChange={(e) => {
+                                setNewPassword(e.target.value);
+                                setPasswordError("");
+                            }}
+                            minLength={6}
+                            autoComplete="new-password"
+                            className="h-11"
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="new-password-again">Yeni şifre (tekrar)</Label>
+                        <Input
+                            id="new-password-again"
+                            type="password"
+                            value={newPasswordAgain}
+                            onChange={(e) => {
+                                setNewPasswordAgain(e.target.value);
+                                setPasswordError("");
+                            }}
+                            minLength={6}
+                            autoComplete="new-password"
+                            className="h-11"
+                        />
+                    </div>
+                </div>
+
+                {passwordError && (
+                    <div className="flex items-start gap-2 text-sm text-destructive">
+                        <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                        <span>{passwordError}</span>
+                    </div>
+                )}
+                {passwordSuccess && (
+                    <div className="flex items-start gap-2 text-sm text-emerald-500">
+                        <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                        <span>{passwordSuccess}</span>
+                    </div>
+                )}
+
+                <div className="flex justify-end">
+                    <Button
+                        variant="outline"
+                        onClick={submitPasswordChange}
+                        disabled={changingPassword || !currentPassword || !newPassword || !newPasswordAgain}
+                    >
+                        {changingPassword ? (
+                            <>
+                                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                Güncelleniyor...
+                            </>
+                        ) : (
+                            "Şifreyi güncelle"
                         )}
                     </Button>
                 </div>

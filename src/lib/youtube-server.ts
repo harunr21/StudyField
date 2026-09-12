@@ -220,3 +220,47 @@ export async function searchPlaylistsOnYoutube(query: string, maxResults = 10): 
             .filter((r: YTSearchResult) => r.playlistId)
     );
 }
+
+export interface YTVideoDetails extends YTVideoInfo {
+    videoId: string;
+}
+
+/**
+ * Birden fazla video icin baslik/kanal/sure bilgisini 50'lik gruplarla tek istekte ceker.
+ * Bulunamayan (silinmis/ozel) videolar sonuca girmez.
+ */
+export async function fetchVideosInfoFromYoutube(videoIds: string[]): Promise<Map<string, YTVideoDetails>> {
+    const apiKey = getApiKey();
+    const result = new Map<string, YTVideoDetails>();
+
+    for (let i = 0; i < videoIds.length; i += 50) {
+        const batch = videoIds.slice(i, i + 50);
+        const url = `${YOUTUBE_API_BASE}/videos?part=snippet,contentDetails&id=${batch.join(",")}&key=${apiKey}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const errorData: any = await response.json().catch(() => ({}));
+            throw new Error(errorData?.error?.message || `YouTube API error: ${response.status}`);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: any = await response.json();
+        for (const item of data.items ?? []) {
+            const snippet = item.snippet ?? {};
+            const duration = item.contentDetails?.duration || "";
+            result.set(item.id, {
+                videoId: item.id,
+                title: snippet.title ?? "",
+                description: snippet.description ?? "",
+                thumbnailUrl:
+                    snippet.thumbnails?.medium?.url ||
+                    snippet.thumbnails?.default?.url ||
+                    `https://img.youtube.com/vi/${item.id}/mqdefault.jpg`,
+                channelTitle: snippet.channelTitle ?? "",
+                duration,
+                durationFormatted: parseDuration(duration),
+            });
+        }
+    }
+
+    return result;
+}

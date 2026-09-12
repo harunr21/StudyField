@@ -3,7 +3,8 @@
  * - /ws/study-room  -> oturumu dogrular, Study Room Durable Object'ine WebSocket olarak yonlendirir
  * - diger her sey    -> OpenNext tarafindan uretilen Next.js handler'i
  */
-// @ts-expect-error `.open-next/worker.js` build sirasinda uretilir
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- dosya build sirasinda uretilir
+// @ts-ignore
 import { default as nextHandler } from "./.open-next/worker.js";
 import { and, eq, or } from "drizzle-orm";
 import { createDb, schema } from "./src/db";
@@ -13,7 +14,8 @@ import { StudyRoom, type StudyRoomIdentity } from "./src/durable-objects/study-r
 export { StudyRoom };
 
 // OpenNext'in uretebilecegi DO siniflari (kullanilmasa da export edilmeli)
-// @ts-expect-error build sirasinda uretilir
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- dosya build sirasinda uretilir
+// @ts-ignore
 export { DOQueueHandler, DOShardedTagCache, BucketCachePurge } from "./.open-next/worker.js";
 
 async function handleStudyRoomSocket(request: Request, env: CloudflareEnv): Promise<Response> {
